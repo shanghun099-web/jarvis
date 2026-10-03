@@ -322,9 +322,15 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-volume"/></svg>목소리</h3>
       <div class="switch"><span>대답을 소리 내어 읽기</span><input type="checkbox" id="ttsOn"></div>
+      <label for="voiceSel">목소리 고르기</label>
+      <select id="voiceSel"></select>
       <label for="rate">말하는 속도 <span id="rateVal"></span></label>
-      <input type="range" id="rate" min="0.7" max="1.6" step="0.1">
-      <button class="btn ghost small" id="ttsTest" style="margin-top:10px">들어보기</button>
+      <input type="range" id="rate" min="0.7" max="1.5" step="0.05">
+      <label for="pitch">목소리 높낮이 <span id="pitchVal"></span></label>
+      <input type="range" id="pitch" min="0.8" max="1.2" step="0.05">
+      <button class="btn ghost small" id="ttsTest" style="margin-top:10px"><svg class="i sm" aria-hidden="true"><use href="#i-volume"/></svg>들어보기</button>
+      <p>목소리마다 들어보고 가장 자연스러운 걸 고르세요. "Google"이 붙은 목소리가 대체로 자연스러워요.<br>
+      그래도 기계 같으면 폰 <b>설정 → 일반(또는 접근성) → 텍스트 음성 변환(TTS)</b>에서 기본 엔진을 <b>Google</b>로 바꾸고, 한국어 음성 데이터를 <b>고품질</b>로 설치해 보세요.</p>
     </div>
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-coin"/></svg>이번 달 사용 요금 (이 폰 기준 예상)</h3>
@@ -698,15 +704,40 @@ async function showBrief(sayIt) {
 }
 
 // ───── 목소리 ─────
+// 폰에 깔린 한국어 목소리 중 고르기. 고른 게 없으면 자연스러운 쪽(Google·Natural·Neural·network)을 먼저.
+const koVoices = () => ("speechSynthesis" in window ? speechSynthesis.getVoices() : [])
+  .filter(v => (v.lang || "").replace("_", "-").toLowerCase().startsWith("ko"));
+const voiceScore = v => (/natural|neural|online|network|premium|enhanced/i.test(v.name + v.voiceURI) ? 2 : 0) + (/google/i.test(v.name) ? 1 : 0) + (v.localService ? 0 : 0.5);
+function pickVoice() {
+  const list = koVoices(); if (!list.length) return null;
+  return list.find(v => v.voiceURI === ls.get("jv_voice", "")) || [...list].sort((a, b) => voiceScore(b) - voiceScore(a))[0];
+}
+// 읽기 좋게 다듬기: 괄호·기호를 쉼으로 바꾸고, 문장마다 나눠 읽어 자연스러운 쉼을 줌(긴 글이 중간에 끊기는 것도 막음).
+function sayable(t) {
+  return t.replace(/\([^)]*\)/g, "").replace(/[·•|/]/g, ", ").replace(/[~*#_`"“”‘’]/g, "").replace(/\s+/g, " ").trim();
+}
 function speak(t) {
   if (ls.get("jv_tts", "1") !== "1" || !("speechSynthesis" in window)) return;
   speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(t);
-  u.lang = "ko-KR"; u.rate = +ls.get("jv_rate", "1.1");
-  const v = speechSynthesis.getVoices().find(v => v.lang && v.lang.replace("_", "-").startsWith("ko"));
-  if (v) u.voice = v;
-  speechSynthesis.speak(u);
+  const v = pickVoice();
+  const parts = sayable(t).split(/(?<=[.!?。])\s+/);   // "18.5도" 같은 소수점은 안 끊고, 문장 끝에서만 나눔
+  for (const part of parts) {
+    if (!part.trim()) continue;
+    const u = new SpeechSynthesisUtterance(part.trim());
+    u.lang = "ko-KR"; u.rate = +ls.get("jv_rate", "1"); u.pitch = +ls.get("jv_pitch", "1");
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  }
 }
+function fillVoices() {
+  const sel = $("#voiceSel"); if (!sel) return;
+  const list = koVoices(), cur = pickVoice();
+  sel.innerHTML = list.length
+    ? list.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)}${v.localService ? "" : " (온라인)"}</option>`).join("")
+    : `<option value="">이 폰에서 한국어 목소리를 찾지 못했어요</option>`;
+  if (cur) sel.value = cur.voiceURI;
+}
+if ("speechSynthesis" in window) speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
 // ───── 계속 듣기: 말이 이어지는 동안 계속 듣고, 2초 넘게 조용하거나 버튼을 다시 누르면 끝 ─────
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -961,8 +992,11 @@ function loadSettings() {
     $(sel).value = model(kind);
   }
   $("#ttsOn").checked = ls.get("jv_tts", "1") === "1";
-  $("#rate").value = ls.get("jv_rate", "1.1");
-  $("#rateVal").textContent = "×" + (+$("#rate").value).toFixed(1);
+  $("#rate").value = ls.get("jv_rate", "1");
+  $("#rateVal").textContent = "×" + (+$("#rate").value).toFixed(2);
+  $("#pitch").value = ls.get("jv_pitch", "1");
+  $("#pitchVal").textContent = "×" + (+$("#pitch").value).toFixed(2);
+  fillVoices();
   $("#who").textContent = user ? user.email + " 로 로그인됨" : "";
   $("#wxPlace").innerHTML = ic("c-place", "sm") + " " + esc(place().name);
   showBackupInfo(); showCost();
@@ -1049,8 +1083,10 @@ $("#wxReset").onclick = () => { ls.del("jv_place"); ls.del("jv_wx"); loadSetting
 $("#mSave").onchange = e => ls.set("jv_m_save", e.target.value);
 $("#mAsk").onchange = e => ls.set("jv_m_ask", e.target.value);
 $("#ttsOn").onchange = e => ls.set("jv_tts", e.target.checked ? "1" : "0");
-$("#rate").oninput = e => { ls.set("jv_rate", e.target.value); $("#rateVal").textContent = "×" + (+e.target.value).toFixed(1); };
-$("#ttsTest").onclick = () => { const on = ls.get("jv_tts", "1"); ls.set("jv_tts", "1"); speak("안녕하세요. 저는 자비스예요. 무엇이든 말씀해 주세요."); ls.set("jv_tts", on); };
+$("#rate").oninput = e => { ls.set("jv_rate", e.target.value); $("#rateVal").textContent = "×" + (+e.target.value).toFixed(2); };
+$("#pitch").oninput = e => { ls.set("jv_pitch", e.target.value); $("#pitchVal").textContent = "×" + (+e.target.value).toFixed(2); };
+$("#voiceSel").onchange = e => { ls.set("jv_voice", e.target.value); $("#ttsTest").click(); };
+$("#ttsTest").onclick = () => { const on = ls.get("jv_tts", "1"); ls.set("jv_tts", "1"); speak("안녕하세요. 저는 자비스예요. 오늘 일원동은 오후 3시쯤 비 소식이 있어요. 무엇이든 말씀해 주세요."); ls.set("jv_tts", on); };
 $("#logout").onclick = async () => { if (confirm("로그아웃할까요?")) { await sb.auth.signOut(); location.reload(); } };
 
 // 로그인 / 가입
