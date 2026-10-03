@@ -366,15 +366,41 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-volume"/></svg>목소리</h3>
       <div class="switch"><span>대답을 소리 내어 읽기</span><input type="checkbox" id="ttsOn"></div>
-      <label for="voiceSel">목소리 고르기</label>
-      <select id="voiceSel"></select>
+      <label for="engSel">목소리 종류</label>
+      <select id="engSel">
+        <option value="phone">폰 기본 · 무료</option>
+        <option value="google">구글 고급 · 월 100만 자 무료</option>
+        <option value="openai">OpenAI 고급 · 답 1번 약 5원</option>
+      </select>
+      <div id="engPhone">
+        <label for="voiceSel">폰 목소리 고르기</label>
+        <select id="voiceSel"></select>
+        <label for="pitch">목소리 높낮이 <span id="pitchVal"></span></label>
+        <input type="range" id="pitch" min="0.8" max="1.2" step="0.05">
+        <p>"Google"이 붙은 목소리가 대체로 자연스러워요. 그래도 기계 같으면 폰 <b>설정 → 일반(또는 접근성) → 텍스트 음성 변환</b>에서 기본 엔진을 <b>Google</b>로, 한국어 음성을 <b>고품질</b>로 설치해 보세요.</p>
+      </div>
+      <div id="engGoogle" hidden>
+        <label for="gKey">구글 클라우드 API 키</label>
+        <div class="line"><input id="gKey" type="password" placeholder="AIza로 시작하는 키" autocomplete="off"><button class="btn small" id="gKeySave">저장</button></div>
+        <div class="msg" id="gKeyMsg"></div>
+        <label for="gVoice">구글 목소리 고르기</label>
+        <select id="gVoice"><option value="">키를 저장하면 목록이 나와요</option></select>
+        <p>만드는 곳: <a href="https://console.cloud.google.com/apis/library/texttospeech.googleapis.com" target="_blank" rel="noopener">구글 클라우드 콘솔</a> → Cloud Text-to-Speech API <b>사용</b> → 결제 계정 연결(카드 등록, 한 달 100만 글자까지 무료) → 사용자 인증 정보 → <b>API 키 만들기</b>. 키 제한에서 이 API만 허용해 두면 안전해요.</p>
+      </div>
+      <div id="engOpenai" hidden>
+        <label for="oKey">OpenAI API 키</label>
+        <div class="line"><input id="oKey" type="password" placeholder="sk-로 시작하는 키" autocomplete="off"><button class="btn small" id="oKeySave">저장</button></div>
+        <div class="msg" id="oKeyMsg"></div>
+        <label for="oVoice">OpenAI 목소리 고르기</label>
+        <select id="oVoice"></select>
+        <label for="oStyle">말투</label>
+        <input id="oStyle" placeholder="예) 차분하고 친절한 비서처럼">
+        <p>만드는 곳: <a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noopener">platform.openai.com</a>에서 5달러 충전 → API keys → <b>Create new secret key</b>. 월 사용 한도도 꼭 걸어 두세요.</p>
+      </div>
       <label for="rate">말하는 속도 <span id="rateVal"></span></label>
       <input type="range" id="rate" min="0.7" max="1.5" step="0.05">
-      <label for="pitch">목소리 높낮이 <span id="pitchVal"></span></label>
-      <input type="range" id="pitch" min="0.8" max="1.2" step="0.05">
       <button class="btn ghost small" id="ttsTest" style="margin-top:10px"><svg class="i sm" aria-hidden="true"><use href="#i-volume"/></svg>들어보기</button>
-      <p>목소리마다 들어보고 가장 자연스러운 걸 고르세요. "Google"이 붙은 목소리가 대체로 자연스러워요.<br>
-      그래도 기계 같으면 폰 <b>설정 → 일반(또는 접근성) → 텍스트 음성 변환(TTS)</b>에서 기본 엔진을 <b>Google</b>로 바꾸고, 한국어 음성 데이터를 <b>고품질</b>로 설치해 보세요.</p>
+      <p>키는 이 폰 안에만 저장돼요. 고급 목소리가 안 되면 폰 기본 목소리로 자동으로 읽어요.</p>
     </div>
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-coin"/></svg>이번 달 사용 요금 (이 폰 기준 예상)</h3>
@@ -770,18 +796,84 @@ function pickVoice() {
 function sayable(t) {
   return t.replace(/\([^)]*\)/g, "").replace(/[·•|/]/g, ", ").replace(/[~*#_`"“”‘’]/g, "").replace(/\s+/g, " ").trim();
 }
-function speak(t) {
-  if (ls.get("jv_tts", "1") !== "1" || !("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
+// 목소리 종류: phone(폰 기본) / google(구글 Chirp 3 HD) / openai. 고급 목소리는 키가 있을 때만, 안 되면 폰 목소리로.
+const engine = () => { const e = ls.get("jv_engine", "phone"); return e !== "phone" && ls.get(e === "google" ? "jv_gkey" : "jv_okey", "") ? e : "phone"; };
+const OAI_VOICES = [["coral", "코랄 · 밝은 여성"], ["nova", "노바 · 또렷한 여성"], ["shimmer", "시머 · 부드러운 여성"], ["sage", "세이지 · 차분한 여성"],
+  ["marin", "마린 · 자연스러운 여성"], ["cedar", "시더 · 자연스러운 남성"], ["ash", "애시 · 차분한 남성"], ["echo", "에코 · 부드러운 남성"],
+  ["onyx", "오닉스 · 낮은 남성"], ["verse", "버스 · 표현력 있는 남성"], ["alloy", "얼로이 · 중성"], ["ballad", "발라드 · 감성"]];
+const DEFAULT_STYLE = "영화 속 AI 비서 자비스처럼 차분하고 정중하게, 또렷한 한국어로 말해요.";
+let speakSeq = 0, curAudio = null, warnedCloud = false;
+const splitSentences = t => sayable(t).split(/(?<=[.!?。])\s+/).map(x => x.trim()).filter(Boolean);   // "18.5도" 같은 소수점은 안 끊음
+function stopSpeech() {
+  speakSeq++;
+  if (curAudio) { curAudio.pause(); curAudio = null; }
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+const isSpeaking = () => !!curAudio || ("speechSynthesis" in window && speechSynthesis.speaking);
+function speakPhone(parts) {
+  if (!("speechSynthesis" in window)) return;
   const v = pickVoice();
-  const parts = sayable(t).split(/(?<=[.!?。])\s+/);   // "18.5도" 같은 소수점은 안 끊고, 문장 끝에서만 나눔
   for (const part of parts) {
-    if (!part.trim()) continue;
-    const u = new SpeechSynthesisUtterance(part.trim());
+    const u = new SpeechSynthesisUtterance(part);
     u.lang = "ko-KR"; u.rate = +ls.get("jv_rate", "1"); u.pitch = +ls.get("jv_pitch", "1");
     if (v) u.voice = v;
     speechSynthesis.speak(u);
   }
+}
+async function ttsGoogle(text) {
+  const voice = ls.get("jv_gvoice", "ko-KR-Chirp3-HD-Charon");
+  const body = rate => ({ input: { text }, voice: { languageCode: "ko-KR", name: voice }, audioConfig: { audioEncoding: "MP3", ...(rate ? { speakingRate: rate } : {}) } });
+  const call = b => fetch("https://texttospeech.googleapis.com/v1/text:synthesize?key=" + encodeURIComponent(ls.get("jv_gkey", "")),
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b), signal: AbortSignal.timeout(15000) });
+  const rate = +ls.get("jv_rate", "1");
+  let r = await call(body(rate !== 1 ? rate : null));
+  if (r.status === 400 && rate !== 1) r = await call(body(null));   // 속도 조절을 안 받는 목소리면 기본 속도로
+  if (!r.ok) throw new Error("구글 목소리 오류 " + r.status);
+  const { audioContent } = await r.json();
+  return new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: "audio/mpeg" });
+}
+// gpt-4o-mini-tts 는 속도 숫자를 받지 않아서, 말로 부탁함
+const paceWords = () => { const r = +ls.get("jv_rate", "1"); return r >= 1.15 ? " 평소보다 조금 빠르게 말해요." : r <= 0.85 ? " 평소보다 천천히 말해요." : ""; };
+async function ttsOpenAI(text) {
+  const r = await fetch("https://api.openai.com/v1/audio/speech", {
+    method: "POST", signal: AbortSignal.timeout(20000),
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + ls.get("jv_okey", "") },
+    body: JSON.stringify({ model: "gpt-4o-mini-tts", voice: ls.get("jv_ovoice", "coral"), input: text,
+      instructions: (ls.get("jv_ostyle", "") || DEFAULT_STYLE) + paceWords(), response_format: "mp3" }),
+  });
+  if (!r.ok) throw new Error("OpenAI 목소리 오류 " + r.status);
+  return r.blob();
+}
+const playBlob = (blob, seq) => new Promise(res => {
+  if (seq !== speakSeq) return res();
+  const a = new Audio(URL.createObjectURL(blob)); curAudio = a;
+  const end = () => { URL.revokeObjectURL(a.src); if (curAudio === a) curAudio = null; res(); };
+  a.onended = end; a.onerror = end;
+  a.play().catch(end);
+});
+// 문장마다 한꺼번에 요청해 두고, 받는 대로 순서대로 재생 (첫 문장부터 바로 들림)
+async function speakCloud(parts, eng) {
+  const seq = ++speakSeq;
+  const make = eng === "google" ? ttsGoogle : ttsOpenAI;
+  const jobs = parts.map(p => make(p).catch(e => e));
+  for (let i = 0; i < jobs.length; i++) {
+    const got = await jobs[i];
+    if (seq !== speakSeq) return;
+    if (got instanceof Error) {   // 고급 목소리가 안 되면 남은 문장은 폰 목소리로
+      console.warn(got);
+      if (!warnedCloud) { warnedCloud = true; toast("고급 목소리를 못 불러와서 폰 목소리로 읽어요. 설정에서 키를 확인해 주세요."); }
+      speakPhone(parts.slice(i)); return;
+    }
+    await playBlob(got, seq);
+  }
+}
+function speak(t) {
+  if (ls.get("jv_tts", "1") !== "1") return;
+  stopSpeech();
+  const parts = splitSentences(t); if (!parts.length) return;
+  const eng = engine();
+  // 고급 목소리: 첫 문장은 따로(빨리 시작), 나머지는 한 번에(문장 사이가 자연스럽게)
+  if (eng === "phone") speakPhone(parts); else speakCloud(parts.length > 1 ? [parts[0], parts.slice(1).join(" ")] : parts, eng);
 }
 function fillVoices() {
   const sel = $("#voiceSel"); if (!sel) return;
@@ -806,7 +898,7 @@ function listen() {
   if (busy) return;
   if (listening) { stopAsked = true; rec?.stop(); return; }
   if (!SR) { toast("이 브라우저는 음성 인식이 안 돼요. 크롬으로 열어 주세요."); return; }
-  if ("speechSynthesis" in window) speechSynthesis.cancel();
+  stopSpeech();
   listening = true; stopAsked = false; parts = [];
   setOrb("listen");
   $("#live").classList.remove("idle");
@@ -1347,6 +1439,11 @@ function loadSettings() {
     $(sel).value = model(kind);
   }
   $("#ttsOn").checked = ls.get("jv_tts", "1") === "1";
+  $("#engSel").value = ls.get("jv_engine", "phone"); showEngine();
+  $("#gKey").value = ls.get("jv_gkey", ""); $("#oKey").value = ls.get("jv_okey", "");
+  $("#oVoice").innerHTML = OAI_VOICES.map(([id, nm]) => `<option value="${id}">${nm}</option>`).join("");
+  $("#oVoice").value = ls.get("jv_ovoice", "coral"); $("#oStyle").value = ls.get("jv_ostyle", "");
+  if (ls.get("jv_gkey", "")) loadGoogleVoices().catch(() => {});
   $("#rate").value = ls.get("jv_rate", "1");
   $("#rateVal").textContent = "×" + (+$("#rate").value).toFixed(2);
   $("#pitch").value = ls.get("jv_pitch", "1");
@@ -1405,10 +1502,10 @@ function initHistory() {
 window.addEventListener("popstate", e => {
   const st = e.state || {};
   if (sheetOpen) { closeSheet(true); return; }
-  const busyNow = listening || ("speechSynthesis" in window && speechSynthesis.speaking);
+  const busyNow = listening || isSpeaking();
   if (busyNow && st.jv !== "tab") {
     if (listening) { stopAsked = true; rec?.stop(); }
-    speechSynthesis?.cancel();
+    stopSpeech();
     history.pushState({ jv: "tab", tab: curTab }, "");
     return;
   }
@@ -1480,7 +1577,52 @@ $("#ttsOn").onchange = e => ls.set("jv_tts", e.target.checked ? "1" : "0");
 $("#rate").oninput = e => { ls.set("jv_rate", e.target.value); $("#rateVal").textContent = "×" + (+e.target.value).toFixed(2); };
 $("#pitch").oninput = e => { ls.set("jv_pitch", e.target.value); $("#pitchVal").textContent = "×" + (+e.target.value).toFixed(2); };
 $("#voiceSel").onchange = e => { ls.set("jv_voice", e.target.value); $("#ttsTest").click(); };
-$("#ttsTest").onclick = () => { const on = ls.get("jv_tts", "1"); ls.set("jv_tts", "1"); speak("안녕하세요. 저는 자비스예요. 오늘 일원동은 오후 3시쯤 비 소식이 있어요. 무엇이든 말씀해 주세요."); ls.set("jv_tts", on); };
+function showEngine() {
+  const e = $("#engSel").value;
+  $("#engPhone").hidden = e !== "phone"; $("#engGoogle").hidden = e !== "google"; $("#engOpenai").hidden = e !== "openai";
+}
+$("#engSel").onchange = e => { ls.set("jv_engine", e.target.value); showEngine(); };
+// 구글 한국어 고급 목소리 목록 (Chirp 3 HD 만)
+async function loadGoogleVoices() {
+  const sel = $("#gVoice");
+  const r = await fetch("https://texttospeech.googleapis.com/v1/voices?languageCode=ko-KR&key=" + encodeURIComponent(ls.get("jv_gkey", "")));
+  if (!r.ok) throw new Error("구글 키 오류 " + r.status);
+  const { voices = [] } = await r.json();
+  const list = voices.filter(v => v.name.includes("Chirp3-HD")).sort((a, b) => a.name.localeCompare(b.name));
+  const sex = g => (g === "FEMALE" ? "여성" : g === "MALE" ? "남성" : "");
+  sel.innerHTML = list.length
+    ? list.map(v => `<option value="${esc(v.name)}">${esc(v.name.split("-").pop())} · ${sex(v.ssmlGender)}</option>`).join("")
+    : `<option value="">한국어 고급 목소리를 찾지 못했어요</option>`;
+  const cur = ls.get("jv_gvoice", "");
+  if (list.some(v => v.name === cur)) sel.value = cur; else if (list[0]) { sel.value = list[0].name; ls.set("jv_gvoice", list[0].name); }
+  return list.length;
+}
+$("#gKeySave").onclick = async () => {
+  const k = $("#gKey").value.trim(), msg = $("#gKeyMsg");
+  if (!k) { ls.del("jv_gkey"); msg.textContent = "키를 지웠어요."; return; }
+  ls.set("jv_gkey", k); msg.style.color = "var(--sub)"; msg.textContent = "키 확인 중…";
+  try { const n = await loadGoogleVoices(); msg.style.color = "var(--ok)"; msg.textContent = `✓ 키가 확인됐어요. 한국어 고급 목소리 ${n}개`; }
+  catch { ls.del("jv_gkey"); msg.style.color = "var(--bad)"; msg.textContent = "키가 맞지 않거나 Text-to-Speech API를 아직 켜지 않았어요."; }
+};
+$("#oKeySave").onclick = async () => {
+  const k = $("#oKey").value.trim(), msg = $("#oKeyMsg");
+  if (!k) { ls.del("jv_okey"); msg.textContent = "키를 지웠어요."; return; }
+  msg.style.color = "var(--sub)"; msg.textContent = "키 확인 중…";
+  try {
+    const r = await fetch("https://api.openai.com/v1/models", { headers: { Authorization: "Bearer " + k } });
+    if (!r.ok) throw new Error(r.status);
+    ls.set("jv_okey", k); msg.style.color = "var(--ok)"; msg.textContent = "✓ 키가 확인됐어요. 저장했어요.";
+  } catch { msg.style.color = "var(--bad)"; msg.textContent = "키가 맞지 않아요. 다시 확인해 주세요."; }
+};
+$("#gVoice").onchange = e => { ls.set("jv_gvoice", e.target.value); $("#ttsTest").click(); };
+$("#oVoice").onchange = e => { ls.set("jv_ovoice", e.target.value); $("#ttsTest").click(); };
+$("#oStyle").onchange = e => ls.set("jv_ostyle", e.target.value.trim());
+$("#ttsTest").onclick = () => {
+  const on = ls.get("jv_tts", "1"); ls.set("jv_tts", "1");
+  if ($("#engSel").value !== "phone" && engine() === "phone") toast("키를 먼저 저장해야 고급 목소리를 들을 수 있어요. 지금은 폰 목소리예요.");
+  speak("안녕하세요. 저는 자비스예요. 오늘 일원동은 오후 3시쯤 비 소식이 있어요. 무엇이든 말씀해 주세요.");
+  ls.set("jv_tts", on);
+};
 $("#logout").onclick = async () => { if (confirm("로그아웃할까요?")) { await sb.auth.signOut(); location.reload(); } };
 
 // 로그인 / 가입
