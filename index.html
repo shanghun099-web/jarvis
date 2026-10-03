@@ -186,7 +186,10 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
 .listhint{display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:13px;color:var(--sub)}
 .card{cursor:pointer}
 .card:active{background:var(--panel2)}
-.fact .ft{flex:1;min-height:44px;display:flex;align-items:center;cursor:pointer}
+.fact{cursor:pointer;min-height:48px}
+.fact .ft{flex:1;display:flex;align-items:center}
+.go{flex:none;align-self:center;display:grid;place-items:center;width:24px;margin-right:-6px;color:var(--sub);opacity:.55}
+.card:focus-visible,.fact:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sheet-bg{position:fixed;inset:0;z-index:20;background:rgba(2,6,16,.72);display:flex;align-items:flex-end;justify-content:center}
 .sheet{width:100%;max-width:560px;max-height:90vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-bottom:0;
   border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.5)}
@@ -223,6 +226,7 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
   <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6a1.4 1.4 0 0 1-1 .4H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5Z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.4 18.4a9 9 0 0 0 0-12.8"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
   <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
@@ -962,7 +966,7 @@ async function loadFacts() {
   const f = data || [];
   $("#factCount").textContent = `(${f.length})`;
   $("#facts").innerHTML = f.length
-    ? f.map(x => `<div class="fact"><span class="ft" data-fedit="${x.id}" data-s="${esc(x.subject)}" data-c="${esc(x.content)}"><span><b>${esc(x.subject)}</b> ${esc(x.content)}</span></span><button class="del" data-fact="${x.id}" aria-label="고정 정보 지우기">${ic("i-x")}</button></div>`).join("")
+    ? f.map(x => `<div class="fact" data-fedit="${x.id}" data-s="${esc(x.subject)}" data-c="${esc(x.content)}" role="button" tabindex="0" aria-label="${esc(x.subject)} 고치기"><span class="ft"><span><b>${esc(x.subject)}</b> ${esc(x.content)}</span></span><span class="go" aria-hidden="true">${ic("i-right")}</span></div>`).join("")
     : `<div style="color:var(--sub);font-size:14px;padding:6px 0">아직 없어요. "나는 새벽 4시에 출근해"처럼 말하면 여기 모여요.</div>`;
 }
 async function loadList(reset) {
@@ -988,13 +992,13 @@ async function loadList(reset) {
 function cardHTML(e) {
   const todo = e.done != null;
   const tags = [...(e.people || []), ...(e.places || []), ...(e.tags || [])];
-  return `<div class="card ${e.done ? "done" : ""}" data-day="${e.happened_on}" data-edit="${e.id}"><div class="row">
+  return `<div class="card ${e.done ? "done" : ""}" data-day="${e.happened_on}" data-edit="${e.id}" role="button" tabindex="0" aria-label="${esc((e.summary || e.raw_text) + " 고치기")}"><div class="row">
       ${todo ? `<input type="checkbox" class="chk" data-done="${e.id}" ${e.done ? "checked" : ""} aria-label="할 일 완료">` : `<span class="ic">${catIc(e.category)}</span>`}
       <div style="flex:1;min-width:0"><div class="cat">${esc(catsOf(e).join(" · "))}${e.amount != null ? " · " + Number(e.amount).toLocaleString() + "원" : ""}${e.due_on ? " · 기한 " + pretty(e.due_on) : ""}</div>
       <div class="sum">${esc(e.summary || e.raw_text)}</div>
       ${e.raw_text && e.raw_text !== e.summary ? `<div class="raw">“${esc(e.raw_text)}”</div>` : ""}
       ${tags.length ? `<div class="tags">${tags.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}</div>
-      <button class="del" data-del="${e.id}" aria-label="기록 지우기">${ic("i-x")}</button></div></div>`;
+      <span class="go" aria-hidden="true">${ic("i-right")}</span></div></div>`;
 }
 
 // ───── 기록 고치기·지우기 ─────
@@ -1257,6 +1261,11 @@ document.addEventListener("click", async e => {
   if (fe) { openFact(fe.dataset.fedit, fe.dataset.s, fe.dataset.c); return; }
   const ed = e.target.closest("[data-edit]");
   if (ed && !e.target.closest("input")) { openEntry(ed.dataset.edit); return; }
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const el = e.target.closest?.("[data-edit],[data-fedit]");
+  if (el && el === e.target) { e.preventDefault(); el.click(); }
 });
 document.addEventListener("change", async e => {
   const t = e.target.closest("[data-done]"); if (!t) return;
