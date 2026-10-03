@@ -49,7 +49,8 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:0}
 .brand{display:flex;align-items:center;gap:8px;font-family:var(--hud);font-size:20px;letter-spacing:4px;color:var(--accent);text-shadow:0 0 12px rgba(56,225,255,.45)}
 .brand .i{width:26px;height:26px}
 .back{display:grid;place-items:center;width:40px;height:44px;margin:-10px 0 -10px -12px;color:var(--accent)}
-#costBadge{font-size:13px;color:var(--sub)}
+#costBadge{font-size:13px;color:var(--sub);white-space:nowrap;flex:none}
+@media (max-width:420px){.brand{font-size:18px;letter-spacing:2.5px;gap:6px}}
 .num{font-family:var(--hud);letter-spacing:.5px}
 #costBadge .num{font-size:15px;color:var(--text)}
 .tab{flex:1;overflow-y:auto;padding:12px 16px calc(var(--nav) + 16px)}
@@ -217,6 +218,11 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
 .fixrow small{font-size:13px;color:var(--sub)}
 .sheet .sh-p{margin:4px 0 8px;font-size:14px;color:var(--sub);line-height:1.6}
 .fixed-note{display:block;margin-top:4px;font-size:12px;opacity:.85}
+.costrows{margin-top:8px}
+.costrows div{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:15px}
+.costrows div:first-child{border-top:0}
+.costrows span:last-child{font-family:var(--hud);white-space:nowrap}
+.costrows small{display:block;font-size:13px;color:var(--sub)}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav) + 20px);transform:translateX(-50%);background:#000c;color:#fff;
   padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:90%;text-align:center}
 #toast.on{opacity:1}
@@ -405,7 +411,11 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-coin"/></svg>이번 달 사용 요금 (이 폰 기준 예상)</h3>
       <div id="costNow" style="font-size:22px;font-weight:700"></div>
-      <p>앱이 계산한 대략적인 금액이에요(1달러=1,400원). 정확한 금액은 콘솔의 Usage 메뉴에서 확인하세요.</p>
+      <div class="costrows" id="costRows"></div>
+      <p>앱이 계산한 대략적인 금액이에요(1달러=1,400원). 정확한 금액은 각 사이트에서 확인하세요:
+      <a href="https://console.anthropic.com/usage" target="_blank" rel="noopener">Claude</a> ·
+      <a href="https://platform.openai.com/usage" target="_blank" rel="noopener">OpenAI</a> ·
+      <a href="https://console.cloud.google.com/billing" target="_blank" rel="noopener">구글</a></p>
     </div>
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-user"/></svg>계정</h3>
@@ -484,14 +494,22 @@ function model(kind) { return ls.get(kind === "save" ? "jv_m_save" : "jv_m_ask",
 function addCost(m, usage) {
   const price = MODELS[m]; if (!price || !usage) return;
   const won = ((usage.input_tokens || 0) * price.in + (usage.output_tokens || 0) * price.out) / 1e6 * KRW;
-  const k = "jv_cost_" + todayKST().slice(0, 7);
-  ls.set(k, String(+ls.get(k, "0") + won));
-  showCost();
+  addWon("jv_cost_", won);
 }
+// 이번 달 요금 (이 폰 기준 예상). Claude: jv_cost_달, OpenAI 목소리: jv_cost_oai_달(원), 구글 목소리: jv_gchars_달(글자 수)
+const monthKey = k => k + todayKST().slice(0, 7);
+function addWon(k, won) { const key = monthKey(k); ls.set(key, String(+ls.get(key, "0") + won)); showCost(); }
+const GOOGLE_FREE = 1e6, GOOGLE_PER_CHAR = 30 / 1e6;   // Chirp 3 HD: 한 달 100만 자 무료, 넘으면 100만 자당 30달러
 function showCost() {
-  const won = Math.round(+ls.get("jv_cost_" + todayKST().slice(0, 7), "0"));
-  $("#costBadge").innerHTML = `이번 달 약 <span class="num">${won.toLocaleString()}</span>원`;
-  $("#costNow").textContent = `약 ${won.toLocaleString()}원`;
+  const claude = +ls.get(monthKey("jv_cost_"), "0"), oai = +ls.get(monthKey("jv_cost_oai_"), "0");
+  const gchars = +ls.get(monthKey("jv_gchars_"), "0"), gwon = Math.max(0, gchars - GOOGLE_FREE) * GOOGLE_PER_CHAR * KRW;
+  const total = Math.round(claude + oai + gwon), f = n => Math.round(n).toLocaleString();
+  $("#costBadge").innerHTML = `이번 달 약 <span class="num">${f(total)}</span>원`;
+  $("#costNow").textContent = `약 ${f(total)}원`;
+  const rows = [`<div><span>Claude <small>기록 정리·답변</small></span><span>${f(claude)}원</span></div>`];
+  if (oai || ls.get("jv_okey", "")) rows.push(`<div><span>OpenAI 목소리 <small>읽어 주기</small></span><span>${f(oai)}원</span></div>`);
+  if (gchars || ls.get("jv_gkey", "")) rows.push(`<div><span>구글 목소리 <small>${f(gchars)}자 / 무료 100만 자${gchars > GOOGLE_FREE ? " (넘은 만큼 유료)" : ""}</small></span><span>${f(gwon)}원</span></div>`);
+  $("#costRows").innerHTML = rows.join("");
 }
 // 구조화된 답(JSON)을 받는 호출. Haiku 4.5 는 effort 를 받지 않고, 나머지는 빠른 답을 위해 low.
 async function askJSON(kind, system, content, schema) {
@@ -830,6 +848,7 @@ async function ttsGoogle(text) {
   if (r.status === 400 && rate !== 1) r = await call(body(null));   // 속도 조절을 안 받는 목소리면 기본 속도로
   if (!r.ok) throw new Error("구글 목소리 오류 " + r.status);
   const { audioContent } = await r.json();
+  { const key = monthKey("jv_gchars_"); ls.set(key, String(+ls.get(key, "0") + text.length)); showCost(); }
   return new Blob([Uint8Array.from(atob(audioContent), c => c.charCodeAt(0))], { type: "audio/mpeg" });
 }
 // gpt-4o-mini-tts 는 속도 숫자를 받지 않아서, 말로 부탁함
@@ -842,8 +861,18 @@ async function ttsOpenAI(text) {
       instructions: (ls.get("jv_ostyle", "") || DEFAULT_STYLE) + paceWords(), response_format: "mp3" }),
   });
   if (!r.ok) throw new Error("OpenAI 목소리 오류 " + r.status);
-  return r.blob();
+  const blob = await r.blob();
+  audioSeconds(blob).then(sec => addWon("jv_cost_oai_", (sec || text.length / 7) / 60 * 0.015 * KRW));   // 길이를 못 재면 1초에 7자로 어림
+  return blob;
 }
+// 소리 파일 길이(초)
+const audioSeconds = blob => new Promise(res => {
+  const a = new Audio(); a.preload = "metadata";
+  const done = v => { URL.revokeObjectURL(a.src); res(v); };
+  a.onloadedmetadata = () => done(isFinite(a.duration) ? a.duration : 0);
+  a.onerror = () => done(0);
+  a.src = URL.createObjectURL(blob);
+});
 const playBlob = (blob, seq) => new Promise(res => {
   if (seq !== speakSeq) return res();
   const a = new Audio(URL.createObjectURL(blob)); curAudio = a;
