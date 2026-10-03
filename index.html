@@ -106,6 +106,7 @@ nav.tabs button.on .i{filter:drop-shadow(0 0 6px rgba(56,225,255,.7))}
 .brief .warnline{display:flex;gap:6px;margin-top:10px;font-size:14px;color:#ffd98a;line-height:1.5}
 
 .dock{display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:4px;flex:none}
+.live.idle{color:var(--sub);font-size:14px}
 .live{min-height:24px;color:var(--accent);font-size:16px;text-align:center;padding:0 8px;line-height:1.5}
 .orbwrap{position:relative;width:118px;height:118px;display:grid;place-items:center}
 .orbwrap .hud{position:absolute;inset:0;width:100%;height:100%;fill:none;stroke:var(--accent);opacity:.55;pointer-events:none}
@@ -698,7 +699,8 @@ async function showBrief(sayIt) {
   if (!el) { el = document.createElement("div"); el.id = "briefCard"; el.className = "bub brief"; $("#feed").prepend(el); }
   el.innerHTML = briefHTML(b);
   el.querySelector("[data-say]").onclick = () => speak(b.speech);
-  el.querySelector("[data-hide]").onclick = () => el.remove();
+  el.querySelector("[data-hide]").onclick = () => { el.remove(); setMode(mode); };
+  $("#emptyFeed")?.remove();
   if (sayIt) speak(b.speech);
   return b;
 }
@@ -755,6 +757,7 @@ function listen() {
   if ("speechSynthesis" in window) speechSynthesis.cancel();
   listening = true; stopAsked = false; parts = [];
   setOrb("listen");
+  $("#live").classList.remove("idle");
   $("#live").textContent = "듣고 있어요… 다 말했으면 버튼을 누르세요";
   listenOnce(true);
 }
@@ -785,7 +788,7 @@ function listenOnce(first) {
 function finishListen() {
   rec = null; listening = false; setOrb();
   const t = parts.join(" ").trim(); parts = [];
-  $("#live").textContent = "";
+  idleHint();
   if (t) submit(t);
   else if (!stopAsked) toast("말소리가 안 들렸어요");
 }
@@ -862,16 +865,25 @@ async function submit(text) {
     busy = false; setOrb(); toBottom();
   }
 }
+// 마이크 바로 위 한 줄 안내 (가만히 있을 때). 화면이 작아도 늘 보이는 자리.
+const HINT = {
+  auto: "마이크를 누르고 편하게 말하세요",
+  save: "마이크를 누르고 기록할 내용을 말하세요",
+  ask: "마이크를 누르고 궁금한 걸 물어보세요",
+};
+function idleHint() { const el = $("#live"); el.classList.add("idle"); el.textContent = HINT[mode]; }
+// 대화가 하나도 없을 때만 가운데에 보여 주는 예시
 const EMPTY = {
-  auto: "마이크를 누르고 편하게 말하세요.<br>기록인지 질문인지 자비스가 알아서 판단해요.<br>예) 오늘 물량 많아서 9시에 끝났어<br>예) 지난주에 늦게 끝난 날 언제였어?",
-  save: "마이크를 누르고 오늘 있었던 일을 말해 보세요.<br>예) 내일 엔진오일 갈아야 돼",
-  ask: "마이크를 누르고 궁금한 걸 물어보세요.<br>예) 이번 달 점심값 얼마 썼어?",
+  auto: "기록인지 질문인지 자비스가 알아서 판단해요.<br>예) 오늘 물량 많아서 9시에 끝났어<br>예) 지난주에 늦게 끝난 날 언제였어?",
+  save: "오늘 있었던 일을 말해 보세요.<br>예) 내일 엔진오일 갈아야 돼",
+  ask: "기록에 대해 물어보세요.<br>예) 이번 달 점심값 얼마 썼어?",
 };
 function setMode(m) {
   mode = m; ls.set("jv_mode", m);
   document.querySelectorAll(".mode button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
   $("#txt").placeholder = m === "ask" ? "궁금한 걸 글로 물어봐도 돼요" : "말 대신 글로 써도 돼요";
-  if (!$("#feed .bub:not(.brief)")) {
+  if (!listening) idleHint();
+  if (!$("#feed .bub")) {
     let e = $("#emptyFeed");
     if (!e) { e = document.createElement("div"); e.className = "empty"; e.id = "emptyFeed"; $("#feed").appendChild(e); }
     e.innerHTML = EMPTY[m];
