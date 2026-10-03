@@ -1,0 +1,21 @@
+{
+  "id": "./",
+  "name": "자비스",
+  "short_name": "자비스",
+  "description": "말하면 정리해서 기억하고, 물어보면 대답하는 나만의 비서",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0f1e",
+  "theme_color": "#0a0f1e",
+  "lang": "ko",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "바로 말하기", "short_name": "말하기", "url": "./?rec=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ]
+}
