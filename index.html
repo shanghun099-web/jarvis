@@ -183,6 +183,27 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation:none!important;transition:none!important}
 }
+.listhint{display:flex;align-items:center;gap:6px;margin:4px 0 2px;font-size:13px;color:var(--sub)}
+.card{cursor:pointer}
+.card:active{background:var(--panel2)}
+.fact .ft{flex:1;min-height:44px;display:flex;align-items:center;cursor:pointer}
+.sheet-bg{position:fixed;inset:0;z-index:20;background:rgba(2,6,16,.72);display:flex;align-items:flex-end;justify-content:center}
+.sheet{width:100%;max-width:560px;max-height:90vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-bottom:0;
+  border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.5)}
+.sheet h3{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:18px;color:var(--accent)}
+.sheet label{display:block;font-size:14px;color:var(--sub);margin:14px 0 6px}
+.sheet label .hint{font-size:13px;opacity:.8}
+.sheet textarea{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;width:100%;resize:vertical;line-height:1.5}
+.sheet .chipsel{display:flex;flex-wrap:wrap;gap:8px}
+.sheet .chip .rep{font-size:11px;font-weight:700;color:#04121a;background:var(--accent);border-radius:6px;padding:1px 5px;margin-left:2px}
+.sheet .sh-btns{display:flex;gap:8px;margin-top:20px}
+.sheet .sh-btns .btn{flex:1}
+.btn.danger{background:transparent;color:var(--bad);border:1px solid #5a2730;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:6px}
+.sheet .msg{margin-top:8px}
+#snack{position:fixed;left:12px;right:12px;bottom:calc(var(--nav) + 14px + env(safe-area-inset-bottom));z-index:25;display:flex;align-items:center;gap:10px;
+  max-width:520px;margin:0 auto;padding:6px 6px 6px 16px;background:#1d2a47;border:1px solid var(--line);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
+#snack span{flex:1;font-size:15px}
+#snack button{min-height:44px;padding:0 14px;color:var(--accent);font-weight:700}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav) + 20px);transform:translateX(-50%);background:#000c;color:#fff;
   padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:90%;text-align:center}
 #toast.on{opacity:1}
@@ -249,11 +270,6 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
   <header class="top"><div class="brand"><button class="back" id="backBtn" hidden aria-label="뒤로"><svg class="i lg" aria-hidden="true"><use href="#i-left"/></svg></button><svg class="i reactor" aria-hidden="true"><use href="#i-reactor"/></svg>J.A.R.V.I.S</div><div id="costBadge"></div></header>
 
   <section id="tab-talk" class="tab">
-    <div class="mode">
-      <button data-mode="auto"><svg class="i reactor" aria-hidden="true"><use href="#i-reactor"/></svg>자비스</button>
-      <button data-mode="save"><svg class="i" aria-hidden="true"><use href="#i-pen"/></svg>기록</button>
-      <button data-mode="ask"><svg class="i" aria-hidden="true"><use href="#i-help"/></svg>질문</button>
-    </div>
     <div class="banner" id="keyBanner" hidden>Claude API 키를 넣어야 시작할 수 있어요. <button data-go="set">설정으로 가기</button></div>
     <div id="feed"></div>
     <div class="dock">
@@ -279,6 +295,7 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
       <summary><svg class="i" aria-hidden="true"><use href="#c-pin"/></svg>고정 정보 <span id="factCount"></span></summary>
       <div id="facts"></div>
     </details>
+    <div class="listhint"><svg class="i sm" aria-hidden="true"><use href="#i-pen"/></svg>기록을 누르면 고치거나 지울 수 있어요</div>
     <div id="list"></div>
     <button class="btn ghost small more" id="moreBtn" hidden>더 보기</button>
   </section>
@@ -354,6 +371,8 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
   </nav>
 </div>
 
+<div class="sheet-bg" id="sheetBg" hidden><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" id="sheetBody"></div></div>
+<div id="snack" hidden role="status"><span></span><button type="button"></button></div>
 <div id="toast"></div>
 
 <script type="module">
@@ -390,7 +409,7 @@ let toastT;
 function toast(t) { const el = $("#toast"); el.textContent = t; el.classList.add("on"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("on"), 2600); }
 
 let user = null, busy = false;
-let mode = ls.get("jv_mode", "auto");
+const mode = "auto";   // 기록·질문은 자비스가 판단. 틀리면 결과 말풍선의 정정 버튼으로
 const talkLog = []; // 이번에 나눈 질문·답 (이어 묻기용)
 
 // ───── 날짜 (한국 시간 기준) ─────
@@ -810,26 +829,29 @@ function bubble(cls, html) {
   $("#feed").appendChild(d); toBottom();
   return d;
 }
-function savedHTML(saved, facts) {
+function savedHTML(saved, facts, canAsk) {
   const lines = saved.map(s => `<div class="item"><span class="ic">${catIc(s.category)}</span><span>${esc(s.summary)}<span class="meta">${esc(catsOf(s).join(" · "))} · ${pretty(s.happened_on)}</span></span></div>`);
   facts.forEach(f => lines.push(`<div class="item"><span class="ic">${ic("c-pin")}</span><span>${esc(f.subject)}: ${esc(f.content)}<span class="meta">고정 정보</span></span></div>`));
-  return `저장했어요.${lines.join("")}<div class="acts"><button data-undo>${ic("i-undo", "sm")} 되돌리기</button></div>`;
+  return `저장했어요.${lines.join("")}<div class="acts"><button data-undo>${ic("i-undo", "sm")} 되돌리기</button>` +
+    (canAsk ? `<button data-asask>${ic("i-help", "sm")} 질문이었어요</button>` : "") + `</div>`;
 }
-function answerHTML(a) {
+function answerHTML(a, canSave) {
   const src = a.used.length
     ? `<button data-src>${ic("i-file", "sm")} <span>근거 기록 ${a.used.length}개 보기</span></button>`
     : "";
   return `${esc(a.text)}<span class="meta">기록 ${a.looked}개를 살펴봤어요</span>` +
-    `<div class="acts">${src}<button data-again>${ic("i-volume", "sm")} 다시 듣기</button></div>` +
+    `<div class="acts">${src}<button data-again>${ic("i-volume", "sm")} 다시 듣기</button>` +
+    (canSave ? `<button data-assave>${ic("i-pen", "sm")} 기록이었어요</button>` : "") + `</div>` +
     `<div class="src" hidden>${a.used.map(e => `<div><b>${pretty(e.happened_on)}</b> ${esc(e.summary || e.raw_text)}${e.raw_text && e.raw_text !== e.summary ? `<br>“${esc(e.raw_text)}”` : ""}</div>`).join("")}</div>`;
 }
-async function submit(text) {
+// forced: "save"/"ask" 로 강제(정정 버튼), again: 같은 말을 다시 처리할 땐 내 말풍선을 또 그리지 않음
+async function submit(text, forced = null, again = false) {
   text = text.trim(); if (!text || busy) return;
   busy = true; setOrb("think");
-  bubble("me", esc(text));
+  if (!again) bubble("me", esc(text));
   const wait = bubble("jv", "알아듣는 중…");
   try {
-    const out = await intake(text, mode === "auto" ? null : mode);
+    const out = await intake(text, forced);
     if (out.intent === "brief") {
       wait.remove();
       await showBrief(true);
@@ -841,20 +863,33 @@ async function submit(text) {
       wait.textContent = "정리해서 저장하는 중…";
       const { saved, facts } = await saveEntries(text, out);
       const box = out.intent === "both" ? bubble("jv", "") : wait;
-      box.innerHTML = savedHTML(saved, facts);
-      box.querySelector("[data-undo]").onclick = async ev => {
-        ev.target.disabled = true;
+      box.innerHTML = savedHTML(saved, facts, out.intent === "save");
+      const undo = async () => {
         const ids = saved.map(s => s.id);
         if (ids.length) { await sb.from("facts").delete().in("source_entry_id", ids); await sb.from("entries").delete().in("id", ids); }
+      };
+      box.querySelector("[data-undo]").onclick = async ev => {
+        ev.currentTarget.disabled = true; await undo();
         box.innerHTML = "되돌렸어요. 방금 기록은 지웠어요.";
       };
+      box.querySelector("[data-asask]")?.addEventListener("click", async ev => {
+        if (busy) return;
+        ev.currentTarget.disabled = true; await undo();
+        box.innerHTML = "저장을 취소하고 질문으로 다시 볼게요.";
+        submit(text, "ask", true);
+      });
       spokenText = saved.length === 1 && !facts.length ? `${saved[0].summary}. 저장했어요.` : `${saved.length + facts.length}가지로 나눠서 저장했어요.`;
       if (out.intent === "both") { box.after(wait); wait.textContent = "기록을 찾아보는 중…"; }
     }
     if (out.intent === "ask" || out.intent === "both") {
       wait.textContent = "기록을 찾아보는 중…";
       const a = await answer(text, out.search);
-      wait.innerHTML = answerHTML(a);
+      wait.innerHTML = answerHTML(a, out.intent === "ask");
+      wait.querySelector("[data-assave]")?.addEventListener("click", ev => {
+        if (busy) return;
+        ev.currentTarget.disabled = true;
+        submit(text, "save", true);
+      });
       wait.querySelector("[data-src]")?.addEventListener("click", () => {
         const s = wait.querySelector(".src"); s.hidden = !s.hidden;
         wait.querySelector("[data-src] span").textContent = s.hidden ? `근거 기록 ${a.used.length}개 보기` : "근거 접기";
@@ -887,9 +922,6 @@ const EMPTY = {
   ask: "기록에 대해 물어보세요.<br>예) 이번 달 점심값 얼마 썼어?",
 };
 function setMode(m) {
-  mode = m; ls.set("jv_mode", m);
-  document.querySelectorAll(".mode button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
-  $("#txt").placeholder = m === "ask" ? "궁금한 걸 글로 물어봐도 돼요" : "말 대신 글로 써도 돼요";
   if (!listening) idleHint();
   if (!$("#feed .bub")) {
     let e = $("#emptyFeed");
@@ -900,6 +932,7 @@ function setMode(m) {
 
 // ───── 기록 화면 ─────
 let listCat = "전체", listPage = 0;
+const rows = new Map();   // 화면에 보이는 기록 (고치기 창에서 씀)
 const PAGE = 40;
 async function loadDash() {
   const month = todayKST().slice(0, 7);
@@ -929,11 +962,11 @@ async function loadFacts() {
   const f = data || [];
   $("#factCount").textContent = `(${f.length})`;
   $("#facts").innerHTML = f.length
-    ? f.map(x => `<div class="fact"><span><b>${esc(x.subject)}</b> ${esc(x.content)}</span><button class="del" data-fact="${x.id}" aria-label="고정 정보 지우기">${ic("i-x")}</button></div>`).join("")
+    ? f.map(x => `<div class="fact"><span class="ft" data-fedit="${x.id}" data-s="${esc(x.subject)}" data-c="${esc(x.content)}"><span><b>${esc(x.subject)}</b> ${esc(x.content)}</span></span><button class="del" data-fact="${x.id}" aria-label="고정 정보 지우기">${ic("i-x")}</button></div>`).join("")
     : `<div style="color:var(--sub);font-size:14px;padding:6px 0">아직 없어요. "나는 새벽 4시에 출근해"처럼 말하면 여기 모여요.</div>`;
 }
 async function loadList(reset) {
-  if (reset) { listPage = 0; $("#list").innerHTML = ""; }
+  if (reset) { listPage = 0; $("#list").innerHTML = ""; rows.clear(); }
   let q = sb.from("entries").select(COLS + ",tags,created_at").order("happened_on", { ascending: false }).order("created_at", { ascending: false })
     .range(listPage * PAGE, listPage * PAGE + PAGE - 1);
   if (listCat !== "전체") q = q.contains("cats", [listCat]);
@@ -944,20 +977,143 @@ async function loadList(reset) {
   const html = [];
   for (const e of data) {
     if (e.happened_on !== lastDay) { html.push(`<div class="day">${pretty(e.happened_on)}</div>`); lastDay = e.happened_on; }
-    const todo = e.done != null;
-    const tags = [...(e.people || []), ...(e.places || []), ...(e.tags || [])];
-    html.push(`<div class="card ${e.done ? "done" : ""}" data-day="${e.happened_on}"><div class="row">
-      ${todo ? `<input type="checkbox" class="chk" data-done="${e.id}" ${e.done ? "checked" : ""} aria-label="할 일 완료">` : `<span class="ic">${catIc(e.category)}</span>`}
-      <div style="flex:1;min-width:0"><div class="cat">${esc(catsOf(e).join(" · "))}${e.amount != null ? " · " + Number(e.amount).toLocaleString() + "원" : ""}${e.due_on ? " · 기한 " + pretty(e.due_on) : ""}</div>
-      <div class="sum">${esc(e.summary || e.raw_text)}</div>
-      ${e.raw_text && e.raw_text !== e.summary ? `<div class="raw">“${esc(e.raw_text)}”</div>` : ""}
-      ${tags.length ? `<div class="tags">${tags.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}</div>
-      <button class="del" data-del="${e.id}" aria-label="기록 지우기">${ic("i-x")}</button></div></div>`);
+    rows.set(e.id, e);
+    html.push(cardHTML(e));
   }
   $("#list").insertAdjacentHTML("beforeend", html.join(""));
   $("#moreBtn").hidden = data.length < PAGE;
   listPage++;
 }
+
+function cardHTML(e) {
+  const todo = e.done != null;
+  const tags = [...(e.people || []), ...(e.places || []), ...(e.tags || [])];
+  return `<div class="card ${e.done ? "done" : ""}" data-day="${e.happened_on}" data-edit="${e.id}"><div class="row">
+      ${todo ? `<input type="checkbox" class="chk" data-done="${e.id}" ${e.done ? "checked" : ""} aria-label="할 일 완료">` : `<span class="ic">${catIc(e.category)}</span>`}
+      <div style="flex:1;min-width:0"><div class="cat">${esc(catsOf(e).join(" · "))}${e.amount != null ? " · " + Number(e.amount).toLocaleString() + "원" : ""}${e.due_on ? " · 기한 " + pretty(e.due_on) : ""}</div>
+      <div class="sum">${esc(e.summary || e.raw_text)}</div>
+      ${e.raw_text && e.raw_text !== e.summary ? `<div class="raw">“${esc(e.raw_text)}”</div>` : ""}
+      ${tags.length ? `<div class="tags">${tags.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}</div>
+      <button class="del" data-del="${e.id}" aria-label="기록 지우기">${ic("i-x")}</button></div></div>`;
+}
+
+// ───── 기록 고치기·지우기 ─────
+// 아래에서 올라오는 창. 폰 뒤로 버튼을 누르면 창만 닫힘.
+let sheetOpen = false;
+function openSheet(html) {
+  $("#sheetBody").innerHTML = html; $("#sheetBg").hidden = false;
+  if (!sheetOpen) history.pushState({ jv: "sheet" }, "");
+  sheetOpen = true;
+}
+function closeSheet(fromBack) {
+  if (!sheetOpen) return;
+  sheetOpen = false; $("#sheetBg").hidden = true;
+  if (!fromBack) history.back();
+}
+function entryForm(e, picked) {
+  const todo = e.done != null;
+  return `<h3 id="sheetTitle">${ic("i-pen")} 기록 고치기</h3>
+    <label for="fSum">요약</label><input id="fSum" value="${esc(e.summary || "")}">
+    <label for="fRaw">말한 내용</label><textarea id="fRaw" rows="3">${esc(e.raw_text || "")}</textarea>
+    <label for="fDay">날짜</label><input id="fDay" type="date" value="${e.happened_on}">
+    <label>카테고리 <span class="hint">· 처음 고른 것이 대표예요</span></label>
+    <div class="chipsel" id="fCats">${catChips(picked)}</div>
+    <label for="fAmt">금액 (원)</label><input id="fAmt" type="number" inputmode="numeric" value="${e.amount ?? ""}" placeholder="돈 이야기가 아니면 비워 두세요">
+    <div class="switch"><span>할 일로 표시</span><input type="checkbox" id="fTodo" ${todo ? "checked" : ""}></div>
+    <div id="fTodoBox" ${todo ? "" : "hidden"}>
+      <label for="fDue">기한</label><input id="fDue" type="date" value="${e.due_on || ""}">
+      <div class="switch"><span>완료했어요</span><input type="checkbox" id="fDone" ${e.done ? "checked" : ""}></div>
+    </div>
+    <div class="msg" id="fMsg"></div>
+    <div class="sh-btns"><button class="btn" id="fSave">저장</button><button class="btn ghost" id="fClose">닫기</button></div>
+    <button class="btn danger" id="fDel">${ic("i-x", "sm")} 이 기록 지우기</button>`;
+}
+const catChips = picked => CATS.map(c => `<button type="button" class="chip ${picked.includes(c) ? "on" : ""}" data-pick="${esc(c)}" aria-pressed="${picked.includes(c)}">${catIc(c, "sm")}${c}${picked[0] === c ? '<b class="rep">대표</b>' : ""}</button>`).join("");
+function openEntry(id) {
+  const e = rows.get(id); if (!e) return;
+  const picked = [...catsOf(e)];
+  openSheet(entryForm(e, picked));
+  $("#fCats").onclick = ev => {
+    const b = ev.target.closest("[data-pick]"); if (!b) return;
+    const c = b.dataset.pick, i = picked.indexOf(c);
+    if (i >= 0) { if (picked.length > 1) picked.splice(i, 1); else return toast("카테고리는 하나 이상 골라야 해요"); }
+    else picked.push(c);
+    $("#fCats").innerHTML = catChips(picked);
+  };
+  $("#fTodo").onchange = ev => { $("#fTodoBox").hidden = !ev.target.checked; };
+  $("#fClose").onclick = () => closeSheet();
+  $("#fDel").onclick = () => { closeSheet(); removeEntry(id); };
+  $("#fSave").onclick = async () => {
+    const day = $("#fDay").value, amt = $("#fAmt").value.trim(), todo = $("#fTodo").checked;
+    if (!okYmd(day)) { $("#fMsg").textContent = "날짜를 골라 주세요."; return; }
+    if (!$("#fSum").value.trim() && !$("#fRaw").value.trim()) { $("#fMsg").textContent = "요약이나 말한 내용 중 하나는 있어야 해요."; return; }
+    const upd = {
+      summary: $("#fSum").value.trim(), raw_text: $("#fRaw").value.trim() || $("#fSum").value.trim(),
+      happened_on: day, category: picked[0], cats: picked,
+      amount: amt === "" ? null : Number(amt),
+      due_on: todo ? (okYmd($("#fDue").value) || null) : null,
+      done: todo ? $("#fDone").checked : null,
+    };
+    $("#fSave").disabled = true;
+    const { data, error } = await sb.from("entries").update(upd).eq("id", id).select(COLS + ",tags,created_at").single();
+    $("#fSave").disabled = false;
+    if (error) { $("#fMsg").textContent = "저장하지 못했어요: " + error.message; return; }
+    closeSheet(); toast("고쳤어요");
+    const card = document.querySelector(`.card[data-edit="${id}"]`);
+    if (card && data.happened_on === e.happened_on && (listCat === "전체" || catsOf(data).includes(listCat))) {
+      rows.set(id, data); card.outerHTML = cardHTML(data);
+    } else loadList(true);   // 날짜나 카테고리가 바뀌면 목록을 다시 그림
+    loadDash();
+  };
+}
+function openFact(id, subject, content) {
+  openSheet(`<h3 id="sheetTitle">${ic("c-pin")} 고정 정보 고치기</h3>
+    <label for="gSub">주제</label><input id="gSub" value="${esc(subject)}">
+    <label for="gCon">내용</label><input id="gCon" value="${esc(content)}">
+    <div class="msg" id="gMsg"></div>
+    <div class="sh-btns"><button class="btn" id="gSave">저장</button><button class="btn ghost" id="gClose">닫기</button></div>
+    <button class="btn danger" id="gDel">${ic("i-x", "sm")} 이 고정 정보 지우기</button>`);
+  $("#gClose").onclick = () => closeSheet();
+  $("#gDel").onclick = () => { closeSheet(); removeFact(id); };
+  $("#gSave").onclick = async () => {
+    const sub = $("#gSub").value.trim(), con = $("#gCon").value.trim();
+    if (!sub || !con) { $("#gMsg").textContent = "주제와 내용을 모두 넣어 주세요."; return; }
+    const { error } = await sb.from("facts").update({ subject: sub, content: con, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) { $("#gMsg").textContent = error.code === "23505" ? "같은 주제가 이미 있어요. 다른 이름으로 해 주세요." : "저장하지 못했어요: " + error.message; return; }
+    closeSheet(); toast("고쳤어요"); loadFacts();
+  };
+}
+// 지우기: 확인 창 대신 바로 지우고 6초 동안 "되돌리기"를 보여 줌
+let snackT;
+function snack(text, label, fn) {
+  const el = $("#snack");
+  el.querySelector("span").textContent = text;
+  const b = el.querySelector("button"); b.textContent = label;
+  b.onclick = () => { el.hidden = true; clearTimeout(snackT); fn(); };
+  el.hidden = false; clearTimeout(snackT);
+  snackT = setTimeout(() => { el.hidden = true; }, 6000);
+}
+async function removeEntry(id) {
+  const { data: row } = await sb.from("entries").select("*").eq("id", id).single();
+  const { error } = await sb.from("entries").delete().eq("id", id);
+  if (error) { toast("지우지 못했어요"); return; }
+  document.querySelector(`.card[data-edit="${id}"]`)?.remove(); rows.delete(id); loadDash();
+  if (row) snack("기록을 지웠어요", "되돌리기", async () => {
+    const { error: e2 } = await sb.from("entries").insert(row);
+    if (e2) toast("되돌리지 못했어요"); else { toast("되돌렸어요"); loadList(true); loadDash(); }
+  });
+}
+async function removeFact(id) {
+  const { data: row } = await sb.from("facts").select("*").eq("id", id).single();
+  const { error } = await sb.from("facts").delete().eq("id", id);
+  if (error) { toast("지우지 못했어요"); return; }
+  loadFacts();
+  if (row) snack("고정 정보를 지웠어요", "되돌리기", async () => {
+    const { error: e2 } = await sb.from("facts").insert(row);
+    if (e2) toast("되돌리지 못했어요"); else { toast("되돌렸어요"); loadFacts(); }
+  });
+}
+$("#sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
 
 // ───── 백업 (내려받기) ─────
 // 마지막 백업(없으면 첫 기록 날)부터 며칠 지났는지. 기록이 없으면 null.
@@ -1068,6 +1224,7 @@ function initHistory() {
 }
 window.addEventListener("popstate", e => {
   const st = e.state || {};
+  if (sheetOpen) { closeSheet(true); return; }
   const busyNow = listening || ("speechSynthesis" in window && speechSynthesis.speaking);
   if (busyNow && st.jv !== "tab") {
     if (listening) { stopAsked = true; rec?.stop(); }
@@ -1076,7 +1233,7 @@ window.addEventListener("popstate", e => {
     return;
   }
   if (listening) { stopAsked = true; rec?.stop(); }
-  if (st.jv === "tab") { go(st.tab, true); return; }
+  if (st.jv === "tab") { if (st.tab !== curTab) go(st.tab, true); return; }
   // 맨 앞(root)까지 왔음: 한 번 더 누르면 앱이 닫힘. 2초 안에 안 누르면 다시 막아 둠.
   if (curTab !== "talk") go("talk", true);
   toast("뒤로 버튼을 한 번 더 누르면 나가요");
@@ -1089,22 +1246,17 @@ $("#backBtn").onclick = () => history.back();
 $("#mic").onclick = listen;
 $("#send").onclick = () => { const t = $("#txt").value; $("#txt").value = ""; submit(t); };
 $("#txt").onkeydown = e => { if (e.key === "Enter" && !e.isComposing) $("#send").click(); };
-document.querySelectorAll(".mode button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
 document.addEventListener("click", async e => {
   const g = e.target.closest("[data-go]"); if (g) { go(g.dataset.go); return; }
   const c = e.target.closest("[data-cat]"); if (c) { listCat = c.dataset.cat; renderChips(); loadList(true); return; }
   const d = e.target.closest("[data-del]");
-  if (d) {
-    if (!confirm("이 기록을 지울까요?")) return;
-    const { error } = await sb.from("entries").delete().eq("id", d.dataset.del);
-    if (error) toast("지우지 못했어요"); else { d.closest(".card").remove(); toast("지웠어요"); }
-    return;
-  }
+  if (d) { removeEntry(d.dataset.del); return; }
   const f = e.target.closest("[data-fact]");
-  if (f) {
-    if (!confirm("이 고정 정보를 지울까요?")) return;
-    await sb.from("facts").delete().eq("id", f.dataset.fact); loadFacts();
-  }
+  if (f) { removeFact(f.dataset.fact); return; }
+  const fe = e.target.closest("[data-fedit]");
+  if (fe) { openFact(fe.dataset.fedit, fe.dataset.s, fe.dataset.c); return; }
+  const ed = e.target.closest("[data-edit]");
+  if (ed && !e.target.closest("input")) { openEntry(ed.dataset.edit); return; }
 });
 document.addEventListener("change", async e => {
   const t = e.target.closest("[data-done]"); if (!t) return;
