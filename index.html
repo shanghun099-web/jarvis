@@ -48,6 +48,7 @@ input:focus,select:focus{outline:2px solid var(--accent);outline-offset:0}
 .top{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:8px;font-family:var(--hud);font-size:20px;letter-spacing:4px;color:var(--accent);text-shadow:0 0 12px rgba(56,225,255,.45)}
 .brand .i{width:26px;height:26px}
+.back{display:grid;place-items:center;width:40px;height:44px;margin:-10px 0 -10px -12px;color:var(--accent)}
 #costBadge{font-size:13px;color:var(--sub)}
 .num{font-family:var(--hud);letter-spacing:.5px}
 #costBadge .num{font-size:15px;color:var(--text)}
@@ -201,6 +202,7 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
   <symbol id="i-volume" viewBox="0 0 24 24"><path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6a1.4 1.4 0 0 1-1 .4H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5Z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.4 18.4a9 9 0 0 0 0-12.8"/></symbol>
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8M16 17H8M10 9H8"/></symbol>
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
   <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></symbol>
@@ -244,7 +246,7 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
 
 <!-- 본 화면 -->
 <div id="main" hidden>
-  <header class="top"><div class="brand"><svg class="i reactor" aria-hidden="true"><use href="#i-reactor"/></svg>J.A.R.V.I.S</div><div id="costBadge"></div></header>
+  <header class="top"><div class="brand"><button class="back" id="backBtn" hidden aria-label="뒤로"><svg class="i lg" aria-hidden="true"><use href="#i-left"/></svg></button><svg class="i reactor" aria-hidden="true"><use href="#i-reactor"/></svg>J.A.R.V.I.S</div><div id="costBadge"></div></header>
 
   <section id="tab-talk" class="tab">
     <div class="mode">
@@ -454,10 +456,11 @@ const INTAKE_SCHEMA = {
     intent: { type: "string", enum: ["save", "ask", "both", "brief"] },
     entries: { type: "array", items: {
       type: "object", additionalProperties: false,
-      required: ["text","summary","category","happened_on","people","places","tags","amount","is_todo","due_on"],
+      required: ["text","summary","category","also","happened_on","people","places","tags","amount","is_todo","due_on"],
       properties: {
         text: { type: "string" }, summary: { type: "string" },
         category: { type: "string", enum: CATS },
+        also: { type: "array", items: { type: "string", enum: CATS } },
         happened_on: DATE, people: strArr, places: strArr, tags: strArr,
         amount: nullable({ type: "number" }),
         is_todo: { type: "boolean" },
@@ -502,7 +505,9 @@ entries (save·both 일 때만 채운다. 질문 부분은 넣지 않는다. 아
 - 서로 다른 일이 여러 개 섞여 있으면 각각 나눈다. 한 가지 일이면 하나만 만든다.
 - text: 그 일에 해당하는 원문 부분을 그대로 옮긴다.
 - summary: 나중에 읽기 쉬운 짧은 한 문장. "~함", "~했음" 체. 음성 인식 오타는 바로잡는다.
-- category: ${CATS.join(", ")} 중 가장 맞는 것 하나.
+- category: ${CATS.join(", ")} 중 가장 중심이 되는 것 하나 (대표).
+- also: 대표 말고도 함께 해당하는 카테고리. 없으면 빈 배열. 돈을 쓰거나 받았으면 대표가 '돈'이 아닐 때 also 에 '돈'을 꼭 넣는다.
+  예) "병원 가서 24000원 냈어" → category 건강, also [돈]. "딸이랑 마트에서 5만원 장 봤어" → category 돈, also [가족].
 - happened_on: 그 일이 있었던 날. "어제", "지난 월요일"은 오늘 기준으로 계산. 언급이 없으면 오늘.
 - people: 등장한 사람 이름이나 호칭. places: 장소. tags: 나중에 찾기 좋은 짧은 단어 1~4개.
 - amount: 돈 이야기면 원 단위 숫자(쓴 돈·번 돈 모두 양수), 아니면 null.
@@ -530,6 +535,7 @@ async function saveEntries(text, out) {
     user_id: user.id,
     raw_text: one && out.intent === "save" ? text : (e.text || text),
     summary: e.summary, category: CATS.includes(e.category) ? e.category : "기타",
+    cats: [...new Set([CATS.includes(e.category) ? e.category : "기타", ...(e.also || []).filter(c => CATS.includes(c))])],
     tags: e.tags, people: e.people, places: e.places,
     happened_on: okYmd(e.happened_on) || today,
     amount: typeof e.amount === "number" ? e.amount : null,
@@ -539,7 +545,7 @@ async function saveEntries(text, out) {
   }));
   let saved = [];
   if (rows.length) {
-    const { data, error } = await sb.from("entries").insert(rows).select("id,category,summary,happened_on");
+    const { data, error } = await sb.from("entries").insert(rows).select("id,category,cats,summary,happened_on");
     if (error) throw new UserErr("저장하지 못했어요: " + error.message);
     saved = data;
     if (!ls.get("jv_first", "")) ls.set("jv_first", today);
@@ -556,7 +562,8 @@ async function saveEntries(text, out) {
 }
 
 // ───── 질문에 답하기: 기록 찾기 → 답 + 근거 ─────
-const COLS = "id,happened_on,category,summary,raw_text,people,places,amount,due_on,done";
+const COLS = "id,happened_on,category,cats,summary,raw_text,people,places,amount,due_on,done";
+const catsOf = e => (e.cats && e.cats.length ? e.cats : [e.category]);
 const clean = s => String(s).replace(/[,()*%{}"'\\:]/g, "").trim();
 async function findEntries(plan) {
   const from = okYmd(plan.date_from), to = okYmd(plan.date_to);
@@ -567,7 +574,8 @@ async function findEntries(plan) {
     return q;
   };
   const ors = [];
-  plan.categories.filter(c => CATS.includes(c)).forEach(c => ors.push(`category.eq.${c}`));
+  plan.categories.filter(c => CATS.includes(c)).forEach(c => ors.push(`cats.cs.{${c}}`));
+  if (plan.categories.includes("돈")) ors.push("amount.not.is.null");   // 병원비처럼 다른 카테고리에 든 돈도 함께
   plan.keywords.map(clean).filter(Boolean).slice(0, 6).forEach(k => ors.push(`raw_text.ilike.*${k}*`, `summary.ilike.*${k}*`));
   plan.people.map(clean).filter(Boolean).slice(0, 4).forEach(p => ors.push(`people.cs.{${p}}`, `raw_text.ilike.*${p}*`));
   if (ors.length) {
@@ -582,7 +590,7 @@ async function findEntries(plan) {
   return data || [];
 }
 function entryLine(e) {
-  const bits = [`[${e.happened_on} ${wdOf(e.happened_on)}] (${e.category}) ${e.summary || ""}`];
+  const bits = [`[${e.happened_on} ${wdOf(e.happened_on)}] (${catsOf(e).join("·")}) ${e.summary || ""}`];
   if (e.raw_text && e.raw_text !== e.summary) bits.push(`원문: ${e.raw_text}`);
   if (e.people?.length) bits.push(`사람: ${e.people.join(", ")}`);
   if (e.places?.length) bits.push(`장소: ${e.places.join(", ")}`);
@@ -803,7 +811,7 @@ function bubble(cls, html) {
   return d;
 }
 function savedHTML(saved, facts) {
-  const lines = saved.map(s => `<div class="item"><span class="ic">${catIc(s.category)}</span><span>${esc(s.summary)}<span class="meta">${esc(s.category)} · ${pretty(s.happened_on)}</span></span></div>`);
+  const lines = saved.map(s => `<div class="item"><span class="ic">${catIc(s.category)}</span><span>${esc(s.summary)}<span class="meta">${esc(catsOf(s).join(" · "))} · ${pretty(s.happened_on)}</span></span></div>`);
   facts.forEach(f => lines.push(`<div class="item"><span class="ic">${ic("c-pin")}</span><span>${esc(f.subject)}: ${esc(f.content)}<span class="meta">고정 정보</span></span></div>`));
   return `저장했어요.${lines.join("")}<div class="acts"><button data-undo>${ic("i-undo", "sm")} 되돌리기</button></div>`;
 }
@@ -896,12 +904,12 @@ const PAGE = 40;
 async function loadDash() {
   const month = todayKST().slice(0, 7);
   const [mRes, todoRes] = await Promise.all([
-    sb.from("entries").select("category,amount").gte("happened_on", month + "-01").limit(3000),
+    sb.from("entries").select("category,cats,amount").gte("happened_on", month + "-01").limit(3000),
     sb.from("entries").select("id", { count: "exact", head: true }).eq("done", false),
   ]);
   const rows = mRes.data || [];
   const count = {}; let money = 0;
-  rows.forEach(r => { count[r.category] = (count[r.category] || 0) + 1; if (r.category === "돈" && r.amount) money += +r.amount; });
+  rows.forEach(r => { catsOf(r).forEach(c => count[c] = (count[c] || 0) + 1); if (r.amount) money += +r.amount; });
   const top = Object.entries(count).sort((a, b) => b[1] - a[1]);
   const max = top[0]?.[1] || 1;
   const [, m] = month.split("-").map(Number);
@@ -928,7 +936,7 @@ async function loadList(reset) {
   if (reset) { listPage = 0; $("#list").innerHTML = ""; }
   let q = sb.from("entries").select(COLS + ",tags,created_at").order("happened_on", { ascending: false }).order("created_at", { ascending: false })
     .range(listPage * PAGE, listPage * PAGE + PAGE - 1);
-  if (listCat !== "전체") q = q.eq("category", listCat);
+  if (listCat !== "전체") q = q.contains("cats", [listCat]);
   const { data, error } = await q;
   if (error) { toast("불러오지 못했어요"); return; }
   if (reset && !data.length) $("#list").innerHTML = `<div class="empty" style="margin-top:40px">기록이 아직 없어요.</div>`;
@@ -940,7 +948,7 @@ async function loadList(reset) {
     const tags = [...(e.people || []), ...(e.places || []), ...(e.tags || [])];
     html.push(`<div class="card ${e.done ? "done" : ""}" data-day="${e.happened_on}"><div class="row">
       ${todo ? `<input type="checkbox" class="chk" data-done="${e.id}" ${e.done ? "checked" : ""} aria-label="할 일 완료">` : `<span class="ic">${catIc(e.category)}</span>`}
-      <div style="flex:1;min-width:0"><div class="cat">${esc(e.category)}${e.amount != null ? " · " + Number(e.amount).toLocaleString() + "원" : ""}${e.due_on ? " · 기한 " + pretty(e.due_on) : ""}</div>
+      <div style="flex:1;min-width:0"><div class="cat">${esc(catsOf(e).join(" · "))}${e.amount != null ? " · " + Number(e.amount).toLocaleString() + "원" : ""}${e.due_on ? " · 기한 " + pretty(e.due_on) : ""}</div>
       <div class="sum">${esc(e.summary || e.raw_text)}</div>
       ${e.raw_text && e.raw_text !== e.summary ? `<div class="raw">“${esc(e.raw_text)}”</div>` : ""}
       ${tags.length ? `<div class="tags">${tags.map(t => `<span>${esc(t)}</span>`).join("")}</div>` : ""}</div>
@@ -983,7 +991,7 @@ async function backup(kind) {
       let last = "";
       [...entries].sort((a, b) => b.happened_on.localeCompare(a.happened_on)).forEach(e => {
         if (e.happened_on !== last) { lines.push("", `■ ${pretty(e.happened_on)}`); last = e.happened_on; }
-        lines.push(`- [${e.category}] ${e.summary || ""}${e.amount != null ? ` (${Number(e.amount).toLocaleString()}원)` : ""}${e.done != null ? (e.done ? " ✔완료" : " ☐할일") : ""}`, `    “${e.raw_text}”`);
+        lines.push(`- [${catsOf(e).join("·")}] ${e.summary || ""}${e.amount != null ? ` (${Number(e.amount).toLocaleString()}원)` : ""}${e.done != null ? (e.done ? " ✔완료" : " ☐할일") : ""}`, `    “${e.raw_text}”`);
       });
       download(`자비스-기록-${day}.txt`, lines.join("\n"), "text/plain");
     }
@@ -1021,7 +1029,16 @@ window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); instal
 $("#installBtn").onclick = async () => { if (!installEvt) return; installEvt.prompt(); await installEvt.userChoice; installEvt = null; $("#installSec").hidden = true; };
 
 // ───── 화면 전환 ─────
-function go(tab) {
+let curTab = "talk";
+// 기록·설정은 말하기(메인) 위에 딱 한 칸만 쌓는다 → 어느 탭에서든 뒤로 한 번이면 메인으로.
+function go(tab, fromBack) {
+  if (!fromBack && tab !== curTab) {
+    if (tab === "talk") { history.back(); return; }                 // 메인 버튼 = 뒤로와 같음
+    if (curTab === "talk") history.pushState({ jv: "tab", tab }, "");
+    else history.replaceState({ jv: "tab", tab }, "");             // 기록 ↔ 설정은 칸을 바꿔치기
+  }
+  curTab = tab;
+  $("#backBtn").hidden = tab === "talk";
   for (const t of ["talk", "list", "set"]) $("#tab-" + t).hidden = t !== tab;
   document.querySelectorAll("nav.tabs button").forEach(b => b.classList.toggle("on", b.dataset.go === tab));
   if (tab === "list") { loadDash(); renderChips(); loadFacts(); loadList(true); }
@@ -1036,9 +1053,37 @@ function route() {
   setMode(mode); refreshBanner(); showCost();
   showBrief(false).catch(console.error);
   // 홈 화면 "바로 말하기"(?rec=1) 로 열면 바로 듣기
-  const qs = new URLSearchParams(location.search);
-  if (qs.has("rec")) { history.replaceState(null, "", location.pathname); setTimeout(listen, 400); }
+  const rec1 = new URLSearchParams(location.search).has("rec");
+  initHistory();
+  if (rec1) setTimeout(listen, 400);
 }
+
+// ───── 뒤로가기 (폰의 뒤로 버튼) ─────
+// 어느 탭에서든 → 말하기(메인)로, 듣는 중·읽는 중이면 멈추기만, 메인에서는 "한 번 더 누르면 나가요".
+// 맨 앞에 root 자리를 하나 깔아 두고, 그 위에 화면마다 한 칸씩 쌓는다.
+let rootT;
+function initHistory() {
+  history.replaceState({ jv: "root" }, "", location.pathname);   // 주소의 ?rec=1 도 여기서 지움
+  history.pushState({ jv: "tab", tab: "talk" }, "");
+}
+window.addEventListener("popstate", e => {
+  const st = e.state || {};
+  const busyNow = listening || ("speechSynthesis" in window && speechSynthesis.speaking);
+  if (busyNow && st.jv !== "tab") {
+    if (listening) { stopAsked = true; rec?.stop(); }
+    speechSynthesis?.cancel();
+    history.pushState({ jv: "tab", tab: curTab }, "");
+    return;
+  }
+  if (listening) { stopAsked = true; rec?.stop(); }
+  if (st.jv === "tab") { go(st.tab, true); return; }
+  // 맨 앞(root)까지 왔음: 한 번 더 누르면 앱이 닫힘. 2초 안에 안 누르면 다시 막아 둠.
+  if (curTab !== "talk") go("talk", true);
+  toast("뒤로 버튼을 한 번 더 누르면 나가요");
+  clearTimeout(rootT);
+  rootT = setTimeout(() => { if (history.state?.jv === "root") history.pushState({ jv: "tab", tab: "talk" }, ""); }, 2000);
+});
+$("#backBtn").onclick = () => history.back();
 
 // ───── 이벤트 ─────
 $("#mic").onclick = listen;
