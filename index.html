@@ -208,6 +208,15 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
   max-width:520px;margin:0 auto;padding:6px 6px 6px 16px;background:#1d2a47;border:1px solid var(--line);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.5)}
 #snack span{flex:1;font-size:15px}
 #snack button{min-height:44px;padding:0 14px;color:var(--accent);font-weight:700}
+.fxadd{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.fxadd input{min-width:0}
+.fxadd .btn{grid-column:1/-1;justify-content:center}
+.sheet label.fixrow{display:flex;gap:12px;align-items:flex-start;margin:0;padding:12px 0;border-top:1px solid var(--line);font-size:16px;color:var(--text);line-height:1.5;cursor:pointer}
+.sheet label.fixrow:first-of-type{border-top:0}
+.fixrow input{width:24px;height:24px;flex:none;margin-top:2px;accent-color:var(--accent)}
+.fixrow small{font-size:13px;color:var(--sub)}
+.sheet .sh-p{margin:4px 0 8px;font-size:14px;color:var(--sub);line-height:1.6}
+.fixed-note{display:block;margin-top:4px;font-size:12px;opacity:.85}
 #toast{position:fixed;left:50%;bottom:calc(var(--nav) + 20px);transform:translateX(-50%);background:#000c;color:#fff;
   padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9;max-width:90%;text-align:center}
 #toast.on{opacity:1}
@@ -335,6 +344,16 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
       <div class="line" style="flex-wrap:wrap"><span id="wxPlace" style="flex:1;min-width:100px"></span>
         <button class="btn ghost small" id="wxHere">지금 위치로</button>
         <button class="btn ghost small" id="wxReset">일원동</button></div>
+    </div>
+    <div class="sec">
+      <h3><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>자주 틀리는 말 사전</h3>
+      <div id="fixList"></div>
+      <div class="fxadd">
+        <input id="fxWrong" placeholder="잘못 들은 말 (호박)" aria-label="잘못 알아들은 말">
+        <input id="fxRight" placeholder="바른 말 (버박코리아)" aria-label="바른 말">
+        <button class="btn small" id="fxAdd">사전에 추가</button>
+      </div>
+      <p>음성 인식이 자주 잘못 알아듣는 이름을 적어 두면, 말할 때 자동으로 고쳐서 저장해요. 기록을 고칠 때도 물어봐요.</p>
     </div>
     <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-brain"/></svg>AI 모델</h3>
@@ -541,6 +560,7 @@ facts (save·both 일 때만. 없으면 빈 배열):
 - 잘 바뀌지 않는 사실만(출퇴근 시간, 가족 생일, 차량번호, 좋아하는 것, 담당 구역 등). 그날 있었던 일은 facts가 아니다.
 - subject는 짧은 주제명. 아래 기존 주제와 같은 내용이면 그 이름을 글자 그대로 다시 쓴다.
   기존 주제: ${subjects.length ? subjects.join(", ") : "(없음)"}
+${fixes.length ? `\n사용자가 자주 쓰는 이름(이 표기 그대로 쓴다): ${[...new Set(fixes.map(f => f.correct))].join(", ")}` : ""}
 
 search (ask·both 일 때만. 아니면 날짜 null, 배열은 비운다):
 - date_from/date_to: 질문에 기간이 있으면 날짜 범위(지난주, 이번 달, 어제 등). 없으면 둘 다 null.
@@ -853,7 +873,9 @@ function answerHTML(a, canSave) {
 async function submit(text, forced = null, again = false) {
   text = text.trim(); if (!text || busy) return;
   busy = true; setOrb("think");
-  if (!again) bubble("me", esc(text));
+  const heardText = text;
+  text = applyFixes(text);   // 자주 틀리는 말 고치기
+  if (!again) bubble("me", esc(text) + (text !== heardText ? `<span class="fixed-note">자주 틀리는 말을 고쳤어요</span>` : ""));
   const wait = bubble("jv", "알아듣는 중…");
   try {
     const out = await intake(text, forced);
@@ -1130,7 +1152,10 @@ function openEntry(id) {
     const { data, error } = await sb.from("entries").update(upd).eq("id", id).select(COLS + ",tags,created_at").single();
     $("#fSave").disabled = false;
     if (error) { $("#fMsg").textContent = "저장하지 못했어요: " + error.message; return; }
-    closeSheet(); toast("고쳤어요");
+    const cand = fixCandidates([...changedWords(e.raw_text || "", upd.raw_text), ...changedWords(e.summary || "", upd.summary)]
+      .filter((p, i, a) => a.findIndex(q => q[0] === p[0] && q[1] === p[1]) === i));
+    if (cand.length) offerFixes(cand, id); else closeSheet();
+    toast("고쳤어요");
     const card = document.querySelector(`.card[data-edit="${id}"]`);
     if (card && data.happened_on === e.happened_on && (listCat === "전체" || catsOf(data).includes(listCat))) {
       rows.set(id, data); card.outerHTML = cardHTML(data);
@@ -1187,6 +1212,88 @@ async function removeFact(id) {
 }
 $("#sheetBg").addEventListener("click", e => { if (e.target.id === "sheetBg") closeSheet(); });
 
+// ───── 자주 틀리는 말 사전 ─────
+let fixes = [];
+// 받침에 따라 조사 고르기: jo("호박","이","가") → "이"
+const jo = (w, withB, noB) => { const c = w.charCodeAt(w.length - 1) - 0xac00; return c >= 0 && c < 11172 && c % 28 ? withB : noB; };
+async function loadFixes() {
+  const { data } = await sb.from("fixes").select("id,wrong,correct").order("created_at");
+  fixes = (data || []).sort((a, b) => b.wrong.length - a.wrong.length);   // 긴 말부터 바꿔야 겹치지 않음
+}
+const applyFixes = t => fixes.reduce((x, f) => x.split(f.wrong).join(f.correct), t);
+// 고친 낱말 쌍 중 사전에 넣을 만한 것: 두 글자 이상, 숫자 아님(9시→10시 같은 건 잘못 들은 게 아님), 아직 사전에 없음
+const fixCandidates = pairs => pairs.filter(([o, n]) => o.length >= 2 && !/\d/.test(o + n) && !fixes.some(f => f.wrong === o && f.correct === n));
+const wordFilter = w => { const c = clean(w); return `raw_text.ilike.*${c}*,summary.ilike.*${c}*,tags.cs.{${c}},places.cs.{${c}},people.cs.{${c}}`; };
+async function countWith(w, exceptId) {
+  let q = sb.from("entries").select("id", { count: "exact", head: true }).or(wordFilter(w));
+  if (exceptId) q = q.neq("id", exceptId);
+  const { count } = await q; return count || 0;
+}
+// 예전 기록에서 틀린 말을 바른 말로 바꾸기
+async function replaceInOld(o, n) {
+  const { data } = await sb.from("entries").select("id,summary,raw_text,people,places,tags").or(wordFilter(o)).limit(500);
+  const fixArr = arr => [...new Set((arr || []).map(x => (x === o ? n : x.split(o).join(n))))];
+  const list = data || [];
+  for (let i = 0; i < list.length; i += 10) {
+    await Promise.all(list.slice(i, i + 10).map(r => sb.from("entries").update({
+      summary: (r.summary || "").split(o).join(n), raw_text: (r.raw_text || "").split(o).join(n),
+      people: fixArr(r.people), places: fixArr(r.places), tags: fixArr(r.tags),
+    }).eq("id", r.id)));
+  }
+  return list.length;
+}
+async function addFix(o, n) {
+  const { error } = await sb.from("fixes").upsert({ user_id: user.id, wrong: o, correct: n }, { onConflict: "user_id,wrong" });
+  if (error) throw new UserErr("사전에 넣지 못했어요: " + error.message);
+}
+// 기록을 고친 뒤 열려 있는 창 안에서 "사전에 기억할까요?" 를 물음 (창을 새로 열지 않고 내용만 바꿈)
+async function offerFixes(pairs, exceptId) {
+  const counts = await Promise.all(pairs.map(([o]) => countWith(o, exceptId)));
+  const total = counts.reduce((a, b) => a + b, 0);
+  $("#sheetBody").innerHTML = `<h3 id="sheetTitle">${ic("i-file")} 자주 틀리는 말로 기억할까요?</h3>
+    <p class="sh-p">음성 인식이 잘못 알아들은 말이면, 앞으로 말할 때 자동으로 고쳐서 저장해요.</p>
+    ${pairs.map(([o, n], i) => `<label class="fixrow"><input type="checkbox" data-fx="${i}" checked><span><b>${esc(o)}</b> → <b>${esc(n)}</b>${counts[i] ? `<br><small>예전 기록 ${counts[i]}개에도 '${esc(o)}'${jo(o, "이", "가")} 있어요</small>` : ""}</span></label>`).join("")}
+    ${total ? `<label class="fixrow"><input type="checkbox" id="xOld" checked><span>예전 기록도 함께 바꾸기 <small>(${total}개)</small></span></label>` : ""}
+    <div class="sh-btns"><button class="btn" id="xYes">기억하기</button><button class="btn ghost" id="xNo">괜찮아요</button></div>`;
+  $("#xNo").onclick = () => closeSheet();
+  $("#xYes").onclick = async () => {
+    $("#xYes").disabled = true;
+    try {
+      const pick = pairs.filter((_, i) => $(`[data-fx="${i}"]`).checked);
+      let changed = 0;
+      for (const [o, n] of pick) {
+        await addFix(o, n);
+        if ($("#xOld")?.checked) changed += await replaceInOld(o, n);
+      }
+      await loadFixes(); closeSheet();
+      toast(pick.length ? `사전에 기억했어요${changed ? ` · 예전 기록 ${changed}개도 바꿨어요` : ""}` : "넣지 않았어요");
+      if (changed) { loadList(true); loadDash(); }
+    } catch (e) { $("#xYes").disabled = false; toast(errText(e)); }
+  };
+}
+function renderFixes() {
+  $("#fixList").innerHTML = fixes.length
+    ? [...fixes].sort((a, b) => a.wrong.localeCompare(b.wrong)).map(f => `<div class="fact"><span class="ft"><span><b>${esc(f.wrong)}</b> → ${esc(f.correct)}</span></span><button class="del" data-fxdel="${f.id}" aria-label="${esc(f.wrong)} 사전에서 빼기">${ic("i-x")}</button></div>`).join("")
+    : `<div style="color:var(--sub);font-size:14px">아직 없어요.</div>`;
+}
+$("#fxAdd").onclick = async () => {
+  const o = $("#fxWrong").value.trim(), n = $("#fxRight").value.trim();
+  if (!o || !n || o === n) { toast("두 칸을 모두 다르게 넣어 주세요"); return; }
+  try {
+    await addFix(o, n); await loadFixes(); renderFixes();
+    $("#fxWrong").value = ""; $("#fxRight").value = "";
+    const c = await countWith(o);
+    if (c) snack(`예전 기록 ${c}개에도 '${o}'${jo(o, "이", "가")} 있어요`, "같이 바꾸기", async () => { const k = await replaceInOld(o, n); toast(`${k}개 바꿨어요`); });
+    else toast("사전에 넣었어요");
+  } catch (e) { toast(errText(e)); }
+};
+document.addEventListener("click", async e => {
+  const d = e.target.closest("[data-fxdel]"); if (!d) return;
+  const f = fixes.find(x => x.id === d.dataset.fxdel);
+  await sb.from("fixes").delete().eq("id", d.dataset.fxdel); await loadFixes(); renderFixes();
+  if (f) snack(`'${f.wrong}'${jo(f.wrong, "을", "를")} 사전에서 뺐어요`, "되돌리기", async () => { await addFix(f.wrong, f.correct); await loadFixes(); renderFixes(); });
+});
+
 // ───── 백업 (내려받기) ─────
 // 마지막 백업(없으면 첫 기록 날)부터 며칠 지났는지. 기록이 없으면 null.
 function backupAge() {
@@ -1210,10 +1317,10 @@ function download(name, text, type) {
 async function backup(kind) {
   try {
     toast("백업 만드는 중…");
-    const [entries, facts, asks] = await Promise.all([fetchAll("entries", "*"), fetchAll("facts", "*"), fetchAll("asks", "*")]);
+    const [entries, facts, asks, fixList] = await Promise.all([fetchAll("entries", "*"), fetchAll("facts", "*"), fetchAll("asks", "*"), fetchAll("fixes", "*")]);
     const day = todayKST();
     if (kind === "json") {
-      download(`자비스-백업-${day}.json`, JSON.stringify({ app: "jarvis", version: 1, exported_at: new Date().toISOString(), email: user.email, entries, facts, asks }, null, 1), "application/json");
+      download(`자비스-백업-${day}.json`, JSON.stringify({ app: "jarvis", version: 1, exported_at: new Date().toISOString(), email: user.email, entries, facts, asks, fixes: fixList }, null, 1), "application/json");
     } else {
       const lines = [`자비스 기록 (${user.email}) — ${day} 내려받음`, "", "■ 고정 정보", ...facts.map(f => `- ${f.subject}: ${f.content}`), ""];
       let last = "";
@@ -1247,7 +1354,7 @@ function loadSettings() {
   fillVoices();
   $("#who").textContent = user ? user.email + " 로 로그인됨" : "";
   $("#wxPlace").innerHTML = ic("c-place", "sm") + " " + esc(place().name);
-  showBackupInfo(); showCost();
+  showBackupInfo(); showCost(); renderFixes();
 }
 function refreshBanner() { $("#keyBanner").hidden = !!ls.get("jv_key", ""); }
 
@@ -1279,6 +1386,7 @@ function route() {
   if (!user || started) return;
   started = true;
   setMode(mode); refreshBanner(); showCost();
+  loadFixes();
   showBrief(false).catch(console.error);
   // 홈 화면 "바로 말하기"(?rec=1) 로 열면 바로 듣기
   const rec1 = new URLSearchParams(location.search).has("rec");
