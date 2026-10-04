@@ -810,9 +810,61 @@ function pickVoice() {
   const list = koVoices(); if (!list.length) return null;
   return list.find(v => v.voiceURI === ls.get("jv_voice", "")) || [...list].sort((a, b) => voiceScore(b) - voiceScore(a))[0];
 }
-// 읽기 좋게 다듬기: 괄호·기호를 쉼으로 바꾸고, 문장마다 나눠 읽어 자연스러운 쉼을 줌(긴 글이 중간에 끊기는 것도 막음).
+// ───── 숫자를 한국어 읽는 말로 (소리 내어 읽기 전에만, 화면 글은 그대로) ─────
+// 단위가 붙은 숫자만 바꾼다. 주소(일원로 3길 62)·전화번호처럼 단위 없는 숫자는 목소리 엔진에 맡김.
+const SINO = ["", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"];
+function sino(n) {   // 24000 → 이만 사천, 1201 → 천이백일
+  n = Math.floor(n); if (!n) return "영";
+  const out = []; let i = 0;
+  while (n > 0) {
+    const c = n % 10000; n = Math.floor(n / 10000);
+    if (c) {
+      const d = [Math.floor(c / 1000) % 10, Math.floor(c / 100) % 10, Math.floor(c / 10) % 10, c % 10];
+      let s = "";
+      d.forEach((x, k) => { if (x) s += (x === 1 && k < 3 ? "" : SINO[x]) + ["천", "백", "십", ""][k]; });
+      if (i === 1 && c === 1) s = "";   // 일만 → 만
+      out.unshift(s + ["", "만", "억", "조"][i]);
+    }
+    i++;
+  }
+  return out.join(" ");
+}
+const NAT1 = ["", "한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉"];
+const NAT10 = ["", "열", "스물", "서른", "마흔", "쉰", "예순", "일흔", "여든", "아흔"];
+const native = n => (n === 20 ? "스무" : NAT10[Math.floor(n / 10)] + NAT1[n % 10]);   // 1~99: 세, 스물한
+const toInt = s => +String(s).replace(/,/g, "");
+// 18.5 → 십팔 점 오
+const numRead = (i, f) => sino(toInt(i)) + (f ? " 점 " + [...f].map(c => (c === "0" ? "영" : SINO[+c])).join("") : "");
+const NUM = "(\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.(\\d+))?";
+const hourRead = h => (h >= 1 && h <= 12 ? native(h) : sino(h));
+const monthRead = m => (m === 6 ? "유" : m === 10 ? "시" : sino(m));
+function koNumbers(t) {
+  return t
+    // 시각: 3시 20분 → 세 시 이십 분, 9시 → 아홉 시 (시간·시작은 빼고)
+    .replace(/(\d{1,2})\s?시\s?(\d{1,2})\s?분/g, (_, h, m) => `${hourRead(+h)} 시 ${sino(+m)} 분`)
+    .replace(/(\d{1,2})\s?시(?![간작])/g, (_, h) => `${hourRead(+h)} 시`)
+    // 날짜: 6월 → 유월, 10월 → 시월, 4일 → 사일
+    .replace(/(\d{1,2})\s?월(?!요)/g, (_, m) => `${monthRead(+m)}월`)
+    .replace(/(\d{1,2})\s?일(?!요)/g, (_, d) => `${sino(+d)}일`)
+    // 큰 단위가 붙은 수: 5만 → 오만, 13.6만 → 십삼 점 육만, 3천 → 삼천
+    .replace(new RegExp(NUM + "\\s?(조|억|만|천|백)", "g"), (_, i, f, u) => numRead(i, f) + u)
+    // 퍼센트·온도 기호
+    .replace(new RegExp(NUM + "\\s?%", "g"), (_, i, f) => numRead(i, f) + " 퍼센트")
+    .replace(new RegExp(NUM + "\\s?(°C|℃|°)", "g"), (_, i, f) => numRead(i, f) + " 도")
+    // 건: 작은 수는 한 건·두 건·열 건, 큰 수는 삼십 건
+    .replace(/(\d+)\s?건/g, (_, n) => { n = toInt(n); return (n >= 1 && n <= 10 ? native(n) : sino(n)) + " 건"; })
+    // 고유어로 세는 단위 (99까지): 3개 → 세 개, 2시간 → 두 시간, 2번 → 두 번 (1번 출구·3번지는 아래에서 일 번·삼 번지)
+    .replace(/(\d{1,3}(?:,\d{3})+|\d+)\s?(개(?!월)|명|번(?!지|\s?(?:출구|버스|라인|게이트|홀|방|선|호선|국도|도로|트랙))|살|마리|잔|병|권|장|군데|곳|가지|시간|박스|봉지|통|벌|켤레|사람)/g,
+      (_, n, u) => { n = toInt(n); return (n >= 1 && n < 100 ? native(n) : sino(n)) + " " + u; })
+    // 한자어로 세는 단위: 24000원 → 이만 사천 원, 18.5도 → 십팔 점 오 도
+    .replace(new RegExp(NUM + "\\s?(원|분|초|년생|년|개월|주일|주|층|호|동|번지|번|도|km|킬로|미터|회|위|등|점|쪽|페이지|인분|차|세)", "g"),
+      (_, i, f, u) => numRead(i, f) + " " + (u === "km" ? "킬로미터" : u))
+    // 쉼표가 든 큰 수만 남았으면: 24,000 → 이만 사천
+    .replace(/\d{1,3}(?:,\d{3})+/g, s => sino(toInt(s)));
+}
+// 읽기 좋게 다듬기: 괄호를 빼고, 숫자를 읽는 말로 바꾸고, 기호를 쉼으로 바꿈.
 function sayable(t) {
-  return t.replace(/\([^)]*\)/g, "").replace(/[·•|/]/g, ", ").replace(/[~*#_`"“”‘’]/g, "").replace(/\s+/g, " ").trim();
+  return koNumbers(t.replace(/\([^)]*\)/g, "")).replace(/[·•|/]/g, ", ").replace(/[~*#_`"“”‘’]/g, "").replace(/\s+/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
 }
 // 목소리 종류: phone(폰 기본) / google(구글 Chirp 3 HD) / openai. 고급 목소리는 키가 있을 때만, 안 되면 폰 목소리로.
 const engine = () => { const e = ls.get("jv_engine", "phone"); return e !== "phone" && ls.get(e === "google" ? "jv_gkey" : "jv_okey", "") ? e : "phone"; };
