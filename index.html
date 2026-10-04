@@ -595,10 +595,11 @@ entries (save·both 일 때만 채운다. 질문 부분은 넣지 않는다. 아
 - category: ${CATS.join(", ")} 중 가장 중심이 되는 것 하나 (대표).
 - also: 대표 말고도 함께 해당하는 카테고리. 없으면 빈 배열. 돈을 쓰거나 받았으면 대표가 '돈'이 아닐 때 also 에 '돈'을 꼭 넣는다.
   예) "병원 가서 24000원 냈어" → category 건강, also [돈]. "딸이랑 마트에서 5만원 장 봤어" → category 돈, also [가족].
-- happened_on: 그 일이 있었던 날. "어제", "지난 월요일"은 오늘 기준으로 계산. 언급이 없으면 오늘.
+- happened_on: 그 일이 있었던 날. "어제", "지난 월요일"은 오늘 기준으로 계산. 언급이 없으면 오늘. 앞으로 할 일·일정이면 말한 날(오늘).
 - people: 등장한 사람 이름이나 호칭. places: 장소. tags: 나중에 찾기 좋은 짧은 단어 1~4개.
 - amount: 돈 이야기면 원 단위 숫자(쓴 돈·번 돈 모두 양수), 아니면 null.
-- is_todo: 앞으로 해야 할 일이면 true. due_on: 할 일의 기한, 없으면 null.
+- is_todo: 앞으로 해야 할 일이나 약속·일정이면 true. due_on: 그 일을 할 날·약속 날·기한("10월 6일까지", "모레 병원"). 날짜가 없으면 null.
+  시간이 있으면 summary 앞에 넣는다. 예) "10월 6일 오후 2시 치과" → summary "오후 2시 치과 진료", due_on 그 날짜.
 
 facts (save·both 일 때만. 없으면 빈 배열):
 - 잘 바뀌지 않는 사실만(출퇴근 시간, 가족 생일, 차량번호, 좋아하는 것, 담당 구역 등). 그날 있었던 일은 facts가 아니다.
@@ -655,27 +656,29 @@ const catsOf = e => (e.cats && e.cats.length ? e.cats : [e.category]);
 const clean = s => String(s).replace(/[,()*%{}"'\\:]/g, "").trim();
 async function findEntries(plan) {
   const from = okYmd(plan.date_from), to = okYmd(plan.date_to);
-  const ranged = () => {
-    let q = sb.from("entries").select(COLS).order("happened_on", { ascending: false }).order("created_at", { ascending: false });
-    if (from) q = q.gte("happened_on", from);
-    if (to) q = q.lte("happened_on", to);
-    return q;
-  };
-  const ors = [];
-  plan.categories.filter(c => CATS.includes(c)).forEach(c => ors.push(`cats.cs.{${c}}`));
-  if (plan.categories.includes("돈")) ors.push("amount.not.is.null");   // 병원비처럼 다른 카테고리에 든 돈도 함께
-  plan.keywords.map(clean).filter(Boolean).slice(0, 6).forEach(k => ors.push(`raw_text.ilike.*${k}*`, `summary.ilike.*${k}*`));
-  plan.people.map(clean).filter(Boolean).slice(0, 4).forEach(p => ors.push(`people.cs.{${p}}`, `raw_text.ilike.*${p}*`));
-  if (ors.length) {
-    const { data, error } = await ranged().or(ors.join(",")).limit(150);
-    if (error) throw new UserErr("기록을 찾지 못했어요: " + error.message);
-    if (data.length) return data;
+  const base = () => sb.from("entries").select(COLS).order("happened_on", { ascending: false }).order("created_at", { ascending: false });
+  const run = async q => { const { data, error } = await q; if (error) throw new UserErr("기록을 찾지 못했어요: " + error.message); return data || []; };
+  const cats = plan.categories.filter(c => CATS.includes(c)).map(c => `cats.cs.{${c}}`);
+  if (plan.categories.includes("돈")) cats.push("amount.not.is.null");   // 병원비처럼 다른 카테고리에 든 돈도 함께
+  const words = [];
+  plan.keywords.map(clean).filter(Boolean).slice(0, 6).forEach(k => words.push(`raw_text.ilike.*${k}*`, `summary.ilike.*${k}*`));
+  plan.people.map(clean).filter(Boolean).slice(0, 4).forEach(p => words.push(`people.cs.{${p}}`, `raw_text.ilike.*${p}*`));
+  let found = [];
+  if (from || to) {
+    const f = from || "0001-01-01", t = to || "9999-12-31";
+    // 1) 그 기간 안의 해당 카테고리 (돈 질문이면 금액 기록이 빠지지 않게 먼저)
+    if (cats.length) found = await run(base().gte("happened_on", f).lte("happened_on", t).or(cats.join(",")).limit(150));
+    // 2) 그 기간에 있었던 일 + 그 기간이 기한(약속 날)인 할 일 — "10월 6일까지 해야 돼"처럼 날짜가 기한에만 있는 기록도
+    found = found.concat(await run(base().or(`and(happened_on.gte.${f},happened_on.lte.${t}),and(due_on.gte.${f},due_on.lte.${t})`).limit(150)));
+    // 3) 낱말로도 찾아서 합침 — 날짜를 잘못 말했거나 다른 날로 저장된 기록까지
+    if (words.length) found = found.concat(await run(base().or(words.join(",")).limit(40)));
+  } else {
+    const ors = [...cats, ...words];
+    if (ors.length) found = await run(base().or(ors.join(",")).limit(150));
   }
-  // 조건으로 못 찾으면: 기간 안 전체 → 그래도 없으면 최근 기록
-  let { data } = await ranged().limit(120);
-  if (data?.length || !(from || to)) return data || [];
-  ({ data } = await sb.from("entries").select(COLS).order("happened_on", { ascending: false }).limit(60));
-  return data || [];
+  if (!found.length) found = await run(base().limit(60));   // 그래도 없으면 최근 기록
+  const seen = new Set();
+  return found.filter(e => !seen.has(e.id) && seen.add(e.id)).slice(0, 150);
 }
 function entryLine(e) {
   const bits = [`[${e.happened_on} ${wdOf(e.happened_on)}] (${catsOf(e).join("·")}) ${e.summary || ""}`];
@@ -683,7 +686,7 @@ function entryLine(e) {
   if (e.people?.length) bits.push(`사람: ${e.people.join(", ")}`);
   if (e.places?.length) bits.push(`장소: ${e.places.join(", ")}`);
   if (e.amount != null) bits.push(`금액: ${e.amount}원`);
-  if (e.done != null) bits.push(e.done ? "할일 완료" : `할일 미완료${e.due_on ? ", 기한 " + e.due_on : ""}`);
+  if (e.done != null) bits.push(e.done ? "할일 완료" : `할일 미완료${e.due_on ? `, 기한(할 날) ${e.due_on} ${wdOf(e.due_on)}` : ""}`);
   return bits.join(" | ");
 }
 const ANSWER_SCHEMA = {
@@ -709,6 +712,7 @@ answer:
 - 목록 기호, 마크다운, 이모지, 괄호 설명은 쓰지 않는다.
 - 날짜는 "10월 1일 수요일"처럼 말한다. 금액 합계·횟수를 물으면 직접 계산해서 말한다.
 - 기록에 없는 내용은 지어내지 말고 "기록에서 찾지 못했어요"라고 솔직하게 말한다.
+- 날짜나 일정을 물으면, 그날 있었던 일뿐 아니라 '기한'이 그날인 할 일도 그날 일정으로 함께 알려 준다.
 used: 답의 근거가 된 기록 번호(#뒤 숫자)만. 고정 정보만 썼거나 근거가 없으면 빈 배열.`,
     `${ctx}\n\n${prev ? `이전 대화:\n${prev}\n\n` : ""}질문: ${question}`, ANSWER_SCHEMA);
   const used = [...new Set(out.used)].map(n => entries[n - 1]).filter(Boolean);
