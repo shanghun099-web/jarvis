@@ -1592,8 +1592,10 @@ window.addEventListener("popstate", e => {
   }
   if (listening) { stopAsked = true; rec?.stop(); }
   if (st.jv === "tab") { if (st.tab !== curTab) go(st.tab, true); return; }
-  // 맨 앞(root)까지 왔음: 한 번 더 누르면 앱이 닫힘. 2초 안에 안 누르면 다시 막아 둠.
-  if (curTab !== "talk") go("talk", true);
+  // 맨 앞(root)까지 왔음.
+  // 기록·설정에서 왔으면(메인 칸이 빠진 채 쌓였던 경우) 메인으로만 가고 안전 칸을 다시 깔아 둠 — 여기서 앱을 닫으면 안 됨.
+  if (curTab !== "talk") { go("talk", true); history.pushState({ jv: "tab", tab: "talk" }, ""); return; }
+  // 메인에서 누른 경우: 한 번 더 누르면 앱이 닫힘. 2초 안에 안 누르면 다시 막아 둠.
   toast("뒤로 버튼을 한 번 더 누르면 나가요");
   clearTimeout(rootT);
   rootT = setTimeout(() => { if (history.state?.jv === "root") history.pushState({ jv: "tab", tab: "talk" }, ""); }, 2000);
