@@ -370,6 +370,17 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
       <p>위에 있을수록 저렴하고 빠르고, 아래로 갈수록 똑똑하지만 비싸요.</p>
     </div>
     <div class="sec">
+      <h3><svg class="i" aria-hidden="true"><use href="#i-mic"/></svg>듣기</h3>
+      <label for="waitSel">말을 멈추면 저장까지 기다리는 시간</label>
+      <select id="waitSel">
+        <option value="2">2초 · 빠르게</option>
+        <option value="5">5초 · 보통 (기본)</option>
+        <option value="8">8초 · 여유 있게</option>
+        <option value="0">버튼을 누를 때까지</option>
+      </select>
+      <p>생각하느라 잠깐 멈춰도 이 시간 안에 다시 말하면 이어서 들어요. 기다리는 동안 마이크 위에 남은 초가 보여요. "버튼을 누를 때까지"는 ⏹️를 눌러야 저장돼요(최대 3분).</p>
+    </div>
+    <div class="sec">
       <h3><svg class="i" aria-hidden="true"><use href="#i-volume"/></svg>목소리</h3>
       <div class="switch"><span>대답을 소리 내어 읽기</span><input type="checkbox" id="ttsOn"></div>
       <label for="engSel">목소리 종류</label>
@@ -970,9 +981,22 @@ function fillVoices() {
 }
 if ("speechSynthesis" in window) speechSynthesis.addEventListener("voiceschanged", fillVoices);
 
-// ───── 계속 듣기: 말이 이어지는 동안 계속 듣고, 2초 넘게 조용하거나 버튼을 다시 누르면 끝 ─────
+// ───── 계속 듣기: 말이 이어지는 동안 계속 듣고, 정한 시간(기본 5초)만큼 조용하거나 버튼을 다시 누르면 끝 ─────
+// 크롬 음성인식은 1초쯤 조용하면 한 번 끊기므로, 끊길 때마다 다시 켜서 이어 듣는다.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, listening = false, stopAsked = false, parts = [], quietT = null;
+let rec = null, listening = false, stopAsked = false, parts = [], quietT = null, countT = null;
+let listenStart = 0, quietSince = 0;
+const waitSec = () => +ls.get("jv_wait", "5");   // 0 이면 버튼을 누를 때까지
+const MAX_LISTEN = 180e3;                          // 버튼 모드라도 3분이 지나면 저장
+function showLive(cur = "") {
+  const said = [...parts, cur].join(" ").trim();
+  let tail = "";
+  if (!cur && quietSince && waitSec()) {
+    const left = Math.max(0, Math.ceil((waitSec() * 1000 - (Date.now() - quietSince)) / 1000));
+    tail = ` · ${left}초 뒤 저장 (더 말해도 돼요)`;
+  }
+  $("#live").textContent = (said || "듣고 있어요… 다 말했으면 버튼을 누르세요") + tail;
+}
 function setOrb(state) {
   const o = $("#mic"), w = $("#orbwrap");
   for (const el of [o, w]) { el.classList.toggle("listen", state === "listen"); el.classList.toggle("think", state === "think"); }
@@ -984,10 +1008,10 @@ function listen() {
   if (listening) { stopAsked = true; rec?.stop(); return; }
   if (!SR) { toast("이 브라우저는 음성 인식이 안 돼요. 크롬으로 열어 주세요."); return; }
   stopSpeech();
-  listening = true; stopAsked = false; parts = [];
+  listening = true; stopAsked = false; parts = []; listenStart = Date.now(); quietSince = 0;
   setOrb("listen");
   $("#live").classList.remove("idle");
-  $("#live").textContent = "듣고 있어요… 다 말했으면 버튼을 누르세요";
+  showLive();
   listenOnce(true);
 }
 function listenOnce(first) {
@@ -995,9 +1019,9 @@ function listenOnce(first) {
   r.lang = "ko-KR"; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
   let got = false, cur = "";
   r.onresult = e => {
-    got = true; clearTimeout(quietT);
+    got = true; quietSince = 0; clearTimeout(quietT); clearInterval(countT);
     cur = ""; for (const x of e.results) cur += x[0].transcript;
-    $("#live").textContent = [...parts, cur].join(" ");
+    showLive(cur);
   };
   r.onerror = e => {
     if (e.error === "not-allowed" || e.error === "service-not-allowed") { toast("마이크 권한을 허용해 주세요"); stopAsked = true; }
@@ -1005,16 +1029,26 @@ function listenOnce(first) {
     else { toast("음성 인식 오류: " + e.error); stopAsked = true; }
   };
   r.onend = () => {
-    clearTimeout(quietT);
+    clearTimeout(quietT); clearInterval(countT);
     if (cur.trim()) parts.push(cur.trim());
-    if (!stopAsked && got) { listenOnce(false); return; }   // 말이 이어질 수 있으니 다시 듣기
+    if (stopAsked || Date.now() - listenStart > MAX_LISTEN) { finishListen(); return; }
+    if (got) { quietSince = Date.now(); listenOnce(false); return; }               // 말이 이어질 수 있으니 다시 듣기
+    if (waitSec() === 0) { listenOnce(false); return; }                             // 버튼을 누를 때까지 계속
+    if (quietSince && Date.now() - quietSince < waitSec() * 1000 - 300) { listenOnce(false); return; }   // 아직 기다리는 중
     finishListen();
   };
   rec = r;
   try { r.start(); } catch { finishListen(); return; }
-  if (!first) quietT = setTimeout(() => { if (!got) { stopAsked = true; r.stop(); } }, 2000);
+  // 말한 뒤 조용해지면 정한 시간만큼 기다리며 남은 초를 보여 줌
+  if (quietSince && waitSec()) {
+    const left = waitSec() * 1000 - (Date.now() - quietSince);
+    quietT = setTimeout(() => { if (!got) { stopAsked = true; r.stop(); } }, Math.max(0, left));
+    countT = setInterval(() => showLive(), 500);
+    showLive();
+  }
 }
 function finishListen() {
+  clearTimeout(quietT); clearInterval(countT); quietSince = 0;
   rec = null; listening = false; setOrb();
   const t = parts.join(" ").trim(); parts = [];
   idleHint();
@@ -1524,6 +1558,7 @@ function loadSettings() {
     $(sel).value = model(kind);
   }
   $("#ttsOn").checked = ls.get("jv_tts", "1") === "1";
+  $("#waitSel").value = ls.get("jv_wait", "5");
   $("#engSel").value = ls.get("jv_engine", "phone"); showEngine();
   $("#gKey").value = ls.get("jv_gkey", ""); $("#oKey").value = ls.get("jv_okey", "");
   $("#oVoice").innerHTML = OAI_VOICES.map(([id, nm]) => `<option value="${id}">${nm}</option>`).join("");
@@ -1669,6 +1704,7 @@ function showEngine() {
   $("#engPhone").hidden = e !== "phone"; $("#engGoogle").hidden = e !== "google"; $("#engOpenai").hidden = e !== "openai";
 }
 $("#engSel").onchange = e => { ls.set("jv_engine", e.target.value); showEngine(); };
+$("#waitSel").onchange = e => { ls.set("jv_wait", e.target.value); toast(e.target.value === "0" ? "버튼을 누를 때까지 들어요" : `${e.target.value}초 조용하면 저장해요`); };
 // 구글 한국어 고급 목소리 목록 (Chirp 3 HD 만)
 async function loadGoogleVoices() {
   const sel = $("#gVoice");
