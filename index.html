@@ -291,6 +291,7 @@ input[type=range]{padding:0;background:none;border:0;accent-color:var(--accent)}
 
   <section id="tab-talk" class="tab">
     <div class="banner" id="keyBanner" hidden>Claude API 키를 넣어야 시작할 수 있어요. <button data-go="set">설정으로 가기</button></div>
+    <div class="banner" id="bkBanner" hidden><span id="bkText"></span> <button data-go="set">설정에서 백업하기</button></div>
     <div id="feed"></div>
     <div class="dock">
       <div class="live" id="live"></div>
@@ -597,7 +598,7 @@ intent:
 - save: 기록해 둘 내용만 있다 (있었던 일, 할 일, 생각, 사실).
 - ask: 저장된 기록에 대해 묻는 질문만 있다.
 - both: 기록할 내용과 질문이 함께 있다.
-- brief: 오늘 브리핑, 오늘 날씨, 오늘 할 일을 묻는 말이다.${FORCE[forced] || ""}
+- brief: "브리핑"이라는 말로 브리핑을 해 달라고 할 때만이다(예: 브리핑해줘, 오늘 브리핑, 아침 브리핑). 오늘 날씨나 오늘 할 일·일정을 묻는 질문은 brief 가 아니라 ask 다.${FORCE[forced] || ""}
 
 entries (save·both 일 때만 채운다. 질문 부분은 넣지 않는다. 아니면 빈 배열):
 - 서로 다른 일이 여러 개 섞여 있으면 각각 나눈다. 한 가지 일이면 하나만 만든다.
@@ -707,16 +708,25 @@ const ANSWER_SCHEMA = {
 async function answer(question, plan) {
   const today = todayKST();
   const prev = recentTalk();
-  const [entries, factsRes] = await Promise.all([
+  // 날씨를 물으면 오늘 날씨, 할 일·일정을 물으면 남은 할 일도 함께 보고 답함 (브리핑 전체를 읽지 않고 질문에만)
+  const askTodo = /할\s?일|일정|해야|약속|스케줄|예약/.test(question);
+  const askWx = /날씨|비\s?(와|올|오|소식)|비가|우산|기온|몇\s?도|더워|더운|추워|추운|눈\s?(와|올|오)|미세먼지/.test(question);
+  const [found, factsRes, todoRes, w] = await Promise.all([
     findEntries(plan),
     sb.from("facts").select("subject,content").order("subject").limit(200),
+    askTodo ? sb.from("entries").select(COLS).eq("done", false).order("due_on", { ascending: true, nullsFirst: false }).limit(50) : null,
+    askWx ? getWeather().catch(() => null) : null,
   ]);
   const facts = factsRes.data || [];
+  const seen = new Set(found.map(e => e.id));
+  const entries = [...found, ...((todoRes && todoRes.data) || []).filter(e => !seen.has(e.id))];
+  const wx = askWx ? weatherInfo(w) : null;
   const ctx =
+    (wx ? `오늘 날씨(${place().name}): 지금 ${wx.t}도 ${wx.tx}, 최고 ${wx.hi}도 최저 ${wx.lo}도, ${wx.rain}.\n\n` : "") +
     `고정 정보:\n${facts.length ? facts.map(f => `- ${f.subject}: ${f.content}`).join("\n") : "(없음)"}\n\n` +
     `기록 (최신순, ${entries.length}개):\n${entries.length ? entries.map((e, i) => `#${i + 1} ${entryLine(e)}`).join("\n") : "(찾은 기록 없음)"}`;
   const out = await askJSON("ask",
-`너는 '자비스'라는 이름의 개인 비서다. 아래에 주어진 사용자의 고정 정보와 기록만 근거로 질문에 답한다.
+`너는 '자비스'라는 이름의 개인 비서다. 아래에 주어진 사용자의 고정 정보와 기록(날씨를 물었으면 오늘 날씨도)만 근거로 질문에 답한다. 묻지 않은 것은 덧붙이지 않는다.
 오늘은 ${today} (${wdOf(today)}요일).
 answer:
 - 소리 내어 읽힌다. 2~4문장의 짧고 자연스러운 존댓말.
@@ -1155,7 +1165,7 @@ const HINT = {
 function idleHint() { const el = $("#live"); el.classList.add("idle"); el.textContent = HINT[mode]; }
 // 대화가 하나도 없을 때만 가운데에 보여 주는 예시
 const EMPTY = {
-  auto: "기록인지 질문인지 자비스가 알아서 판단해요.<br>예) 오늘 물량 많아서 9시에 끝났어<br>예) 지난주에 늦게 끝난 날 언제였어?",
+  auto: "기록인지 질문인지 자비스가 알아서 판단해요.<br>예) 오늘 물량 많아서 9시에 끝났어<br>예) 지난주에 늦게 끝난 날 언제였어?<br>예) 브리핑해줘 (날씨·할 일 한꺼번에)",
   save: "오늘 있었던 일을 말해 보세요.<br>예) 내일 엔진오일 갈아야 돼",
   ask: "기록에 대해 물어보세요.<br>예) 이번 달 점심값 얼마 썼어?",
 };
@@ -1573,7 +1583,12 @@ function loadSettings() {
   $("#wxPlace").innerHTML = ic("c-place", "sm") + " " + esc(place().name);
   showBackupInfo(); showCost(); renderFixes();
 }
-function refreshBanner() { $("#keyBanner").hidden = !!ls.get("jv_key", ""); }
+function refreshBanner() {
+  $("#keyBanner").hidden = !!ls.get("jv_key", "");
+  const d = backupAge();   // 브리핑 카드가 저절로 안 뜨니 백업 알림은 여기서
+  $("#bkBanner").hidden = !(d != null && d >= 7);
+  if (d != null && d >= 7) $("#bkText").textContent = ls.get("jv_bk_day", "") ? `마지막 백업이 ${d}일 전이에요.` : "아직 백업한 적이 없어요.";
+}
 
 // 홈 화면 설치
 let installEvt = null;
@@ -1603,8 +1618,7 @@ function route() {
   if (!user || started) return;
   started = true;
   setMode(mode); refreshBanner(); showCost();
-  loadFixes();
-  showBrief(false).catch(console.error);
+  loadFixes();   // 브리핑은 "브리핑해줘"라고 할 때만 (사용자 요청)
   // 홈 화면 "바로 말하기"(?rec=1) 로 열면 바로 듣기
   const rec1 = new URLSearchParams(location.search).has("rec");
   initHistory();
